@@ -67,7 +67,7 @@ export function ChannelSubForm<R extends ChannelValues>({
   // The backend only checks protected fields of integrations it already knows (matched by uid),
   // so a newly added integration is free to set them
   const canEditProtectedFields = canModifyProtectedFields || !initialValues;
-  const { control, watch, register, trigger, formState, setValue, getValues, unregister } =
+  const { control, watch, register, trigger, formState, setValue, getValues } =
     useFormContext<ReceiverFormValues<CloudChannelValues | GrafanaChannelValues>>();
 
   const channelFieldPath = `items.${integrationIndex}` as const;
@@ -177,7 +177,6 @@ export function ChannelSubForm<R extends ChannelValues>({
       ? settingsPath.slice(`${channelFieldPath}.settings.`.length)
       : settingsPath;
     const fullPath = `${settingsFieldPath}.${fieldPath}` as const;
-    unregister(fullPath);
     setValue(fullPath, undefined);
   };
 
