@@ -1,0 +1,315 @@
+import userEvent from '@testing-library/user-event';
+import { render, screen, within } from 'test/test-utils';
+
+import { locationService } from '@grafana/runtime';
+import {
+  type Repository,
+  useGetRepositoryFilesQuery,
+  useGetRepositoryResourcesQuery,
+} from 'app/api/clients/provisioning/v0alpha1';
+
+import { ResourceTreeView } from './ResourceTreeView';
+
+jest.mock('app/api/clients/provisioning/v0alpha1', () => ({
+  ...jest.requireActual('app/api/clients/provisioning/v0alpha1'),
+  useGetRepositoryFilesQuery: jest.fn(),
+  useGetRepositoryResourcesQuery: jest.fn(),
+}));
+
+const mockUseGetRepositoryFilesQuery = jest.mocked(useGetRepositoryFilesQuery);
+const mockUseGetRepositoryResourcesQuery = jest.mocked(useGetRepositoryResourcesQuery);
+
+const repo: Repository = {
+  metadata: { name: 'test-repo' },
+  spec: {
+    title: 'Test Repository',
+    type: 'github',
+    github: { url: 'https://github.com/org/repo', branch: 'main' },
+    sync: { target: 'folder', enabled: true },
+    workflows: [],
+  },
+};
+
+// The component only reads `data.items` and `isLoading`; the rest of the RTK query result is
+// unused, so a partial mock is enough here.
+function setupQueries(files: unknown[], resources: unknown[] = []) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  mockUseGetRepositoryFilesQuery.mockReturnValue({ data: { items: files }, isLoading: false } as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  mockUseGetRepositoryResourcesQuery.mockReturnValue({ data: { items: resources }, isLoading: false } as any);
+}
+
+describe('ResourceTreeView', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe('folding', () => {
+    // A folder "dashboards" (inferred from the file path) containing one file and a nested subfolder
+    // with its own file. Enough depth to exercise folding at more than one level.
+    const files = [
+      { path: 'dashboards/my-dashboard.json', hash: 'abc123', size: '100' },
+      { path: 'dashboards/nested/other.json', hash: 'def456', size: '200' },
+    ];
+
+    beforeEach(() => {
+      setupQueries(files);
+    });
+
+    it('renders folders folded by default, hiding their contents', async () => {
+      render(<ResourceTreeView repo={repo} />);
+
+      expect(await screen.findByText('dashboards')).toBeInTheDocument();
+      expect(screen.queryByText('my-dashboard.json')).not.toBeInTheDocument();
+      expect(screen.queryByText('nested')).not.toBeInTheDocument();
+    });
+
+    it('reveals a folder’s children when its toggle is clicked and hides them again', async () => {
+      render(<ResourceTreeView repo={repo} />);
+
+      // The fold toggle is labelled by the folder title (via aria-labelledby); state is on aria-expanded.
+      const toggle = await screen.findByRole('button', { name: 'dashboards' });
+      expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+      await userEvent.click(toggle);
+
+      expect(await screen.findByText('my-dashboard.json')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'dashboards' })).toHaveAttribute('aria-expanded', 'true');
+      // The nested subfolder appears but stays folded, so its own file is still hidden.
+      expect(screen.getByText('nested')).toBeInTheDocument();
+      expect(screen.queryByText('other.json')).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole('button', { name: 'dashboards' }));
+
+      expect(screen.queryByText('my-dashboard.json')).not.toBeInTheDocument();
+    });
+
+    it('shows matching nested items regardless of fold state while searching', async () => {
+      render(<ResourceTreeView repo={repo} />);
+
+      await userEvent.type(screen.getByPlaceholderText('Search by path or title'), 'other');
+
+      // Search bypasses the folded state, so the deeply nested match is visible without expanding.
+      expect(await screen.findByText('other.json')).toBeInTheDocument();
+      // Fold toggles are disabled while searching, since search already forces everything open
+      // and toggling would silently desync the stored fold state.
+      expect(screen.getByRole('button', { name: 'dashboards' })).toBeDisabled();
+    });
+  });
+
+  describe('status filter', () => {
+    // Two dashboards under an inferred "folder": one synced (matching hashes), one not in sync.
+    const files = [
+      { path: 'folder/synced.json', hash: 'aaa' },
+      { path: 'folder/pending.json', hash: 'bbb' },
+    ];
+    const resources = [
+      {
+        path: 'folder/synced.json',
+        hash: 'aaa',
+        name: 'synced-dash',
+        title: 'Synced Dashboard',
+        resource: 'dashboards',
+        group: 'dashboard.grafana.app',
+      },
+      {
+        path: 'folder/pending.json',
+        hash: 'zzz',
+        name: 'pending-dash',
+        title: 'Pending Dashboard',
+        resource: 'dashboards',
+        group: 'dashboard.grafana.app',
+      },
+    ];
+
+    beforeEach(() => {
+      setupQueries(files, resources);
+    });
+
+    it('should give the status filter an accessible name', async () => {
+      render(<ResourceTreeView repo={repo} />);
+
+      expect(await screen.findByText('folder')).toBeInTheDocument();
+      expect(screen.getByRole('combobox', { name: 'Filter by status' })).toBeInTheDocument();
+    });
+
+    // The Combobox list is virtualized in jsdom (only the active row renders), so options are
+    // selected by keyboard: opening leaves no option active, the first ArrowDown lands on index 0.
+    // An active filter force-expands the tree, so the matching dashboards become visible.
+    it('should filter to only resources that are not in sync', async () => {
+      const { user } = render(<ResourceTreeView repo={repo} />);
+
+      await user.click(screen.getByRole('combobox', { name: 'Filter by status' }));
+      await user.keyboard('{ArrowDown}{Enter}'); // index 1: Not in sync
+
+      expect(await screen.findByText('Pending Dashboard')).toBeInTheDocument();
+      expect(screen.queryByText('Synced Dashboard')).not.toBeInTheDocument();
+    });
+
+    it('should filter to only synced resources', async () => {
+      const { user } = render(<ResourceTreeView repo={repo} />);
+
+      await user.click(screen.getByRole('combobox', { name: 'Filter by status' }));
+      await user.keyboard('{Enter}'); // index 0: Synced
+
+      expect(await screen.findByText('Synced Dashboard')).toBeInTheDocument();
+      expect(screen.queryByText('Pending Dashboard')).not.toBeInTheDocument();
+    });
+
+    it('should apply the status filter and search together (AND) without leaving empty folders', async () => {
+      const { user } = render(<ResourceTreeView repo={repo} />);
+      expect(await screen.findByText('folder')).toBeInTheDocument();
+
+      // Search for the synced dashboard, then filter to Not in sync: nothing matches both, so the
+      // parent folder must not linger just because it aggregates a (now hidden) pending child.
+      await user.type(screen.getByPlaceholderText('Search by path or title'), 'synced');
+      await user.click(screen.getByRole('combobox', { name: 'Filter by status' }));
+      await user.keyboard('{ArrowDown}{Enter}'); // index 1: Not in sync
+
+      expect(screen.queryByText('Synced Dashboard')).not.toBeInTheDocument();
+      expect(screen.queryByText('Pending Dashboard')).not.toBeInTheDocument();
+      expect(screen.queryByText('folder')).not.toBeInTheDocument();
+    });
+
+    it('should expose the Warnings filter', async () => {
+      const { user } = render(<ResourceTreeView repo={repo} />);
+      expect(await screen.findByText('folder')).toBeInTheDocument();
+
+      await user.click(screen.getByRole('combobox', { name: 'Filter by status' }));
+      await user.keyboard('{ArrowDown}{ArrowDown}{Enter}'); // index 2: Warnings
+
+      // None of the sample resources are missing metadata, so filtering by Warnings hides them all.
+      expect(screen.queryByText('Synced Dashboard')).not.toBeInTheDocument();
+      expect(screen.queryByText('Pending Dashboard')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('resource filter', () => {
+    const resources = [
+      { path: 'folder/dash.json', hash: 'aaa', name: 'dash', title: 'My Dashboard', resource: 'dashboards' },
+      { path: 'folder/widget.json', hash: 'bbb', name: 'widget', title: 'My Widget', resource: 'widgets' },
+    ];
+
+    beforeEach(() => {
+      setupQueries([], resources);
+    });
+
+    it('should filter to the resource type in the URL', async () => {
+      render(<ResourceTreeView repo={repo} />, { historyOptions: { initialEntries: ['/?resource=widgets'] } });
+
+      expect(await screen.findByText('My Widget')).toBeInTheDocument();
+      expect(screen.queryByText('My Dashboard')).not.toBeInTheDocument();
+    });
+
+    it('should filter to the selected resource type and keep it in the URL', async () => {
+      const { user } = render(<ResourceTreeView repo={repo} />);
+
+      await user.click(screen.getByRole('combobox', { name: 'Filter by resource type' }));
+      await user.keyboard('{Enter}'); // index 0: Dashboards
+
+      expect(await screen.findByText('My Dashboard')).toBeInTheDocument();
+      expect(screen.queryByText('My Widget')).not.toBeInTheDocument();
+      expect(locationService.getSearchObject()).toEqual({ resource: 'dashboards' });
+
+      await user.click(screen.getByRole('button', { name: 'Remove Dashboards' }));
+
+      expect(await screen.findByText('My Widget')).toBeInTheDocument();
+      expect(locationService.getSearchObject()).toEqual({});
+    });
+
+    it('should label a kind outside the registry with its resource name', async () => {
+      const { user } = render(<ResourceTreeView repo={repo} />);
+
+      await user.click(screen.getByRole('combobox', { name: 'Filter by resource type' }));
+      await user.keyboard('{ArrowDown}{Enter}'); // index 1: widgets
+
+      expect(await screen.findByRole('button', { name: 'Remove widgets' })).toBeInTheDocument();
+    });
+
+    it('should drop a folder that matches the resource filter but not the status filter', async () => {
+      // The folder has no _folder.json, so its status is a warning, not synced.
+      setupQueries(
+        [{ path: 'folder/dash.json', hash: 'aaa' }],
+        [
+          { path: 'folder', hash: '', name: 'folder-uid', title: 'My Folder', resource: 'folders' },
+          { path: 'folder/dash.json', hash: 'aaa', name: 'dash', title: 'My Dashboard', resource: 'dashboards' },
+        ]
+      );
+      const { user } = render(<ResourceTreeView repo={repo} />);
+      expect(await screen.findByText('My Folder')).toBeInTheDocument();
+
+      await user.click(screen.getByRole('combobox', { name: 'Filter by status' }));
+      await user.keyboard('{Enter}'); // index 0: Synced
+      await user.click(screen.getByRole('combobox', { name: 'Filter by resource type' }));
+      await user.keyboard('{Enter}'); // index 0: Folders
+
+      expect(screen.queryByText('My Folder')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('actions', () => {
+    beforeEach(() => {
+      setupQueries(
+        [{ path: 'README.md', hash: 'aaa' }],
+        [{ path: 'orphan.json', hash: 'bbb', name: 'orphan', title: 'Orphan Dashboard', resource: 'dashboards' }]
+      );
+    });
+
+    it('should disable the View button of a row without a Grafana resource', async () => {
+      render(<ResourceTreeView repo={repo} />);
+
+      const row = await screen.findByRole('row', { name: /README\.md/ });
+      expect(within(row).getByText('View').closest('a')).toHaveAttribute('aria-disabled', 'true');
+    });
+
+    it('should disable the Source button of a row without a file', async () => {
+      render(<ResourceTreeView repo={repo} />);
+
+      const row = await screen.findByRole('row', { name: /Orphan Dashboard/ });
+      expect(within(row).getByText('Source').closest('a')).toHaveAttribute('aria-disabled', 'true');
+    });
+  });
+
+  describe('root folder', () => {
+    const files = [
+      { path: 'folder/_folder.json', hash: 'meta' },
+      { path: 'folder/dash.json', hash: 'aaa' },
+    ];
+    const resources = [
+      { path: '', hash: '', name: 'test-repo', title: 'Test Repository', resource: 'folders' },
+      { path: 'folder', hash: 'meta', name: 'folder-uid', title: 'My Folder', resource: 'folders' },
+      { path: 'folder/dash.json', hash: 'aaa', name: 'dash', title: 'My Dashboard', resource: 'dashboards' },
+    ];
+
+    beforeEach(() => {
+      setupQueries(files, resources);
+    });
+
+    it('should start with only the root folder unfolded', async () => {
+      render(<ResourceTreeView repo={repo} />);
+
+      expect(await screen.findByRole('button', { name: 'Test Repository' })).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByRole('button', { name: 'My Folder' })).toHaveAttribute('aria-expanded', 'false');
+    });
+
+    it('should link the root folder Source button to the repository', async () => {
+      render(<ResourceTreeView repo={repo} />);
+
+      const row = await screen.findByRole('row', { name: /Test Repository/ });
+      expect(within(row).getByRole('link', { name: 'Source' })).toHaveAttribute(
+        'href',
+        'https://github.com/org/repo/tree/main'
+      );
+    });
+
+    it('should link a folder Source button to its _folder.json', async () => {
+      render(<ResourceTreeView repo={repo} />);
+
+      const row = await screen.findByRole('row', { name: /My Folder/ });
+      expect(within(row).getByRole('link', { name: 'Source' })).toHaveAttribute(
+        'href',
+        'https://github.com/org/repo/blob/main/folder/_folder.json'
+      );
+    });
+  });
+});

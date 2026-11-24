@@ -1,0 +1,108 @@
+import { screen, waitFor } from '@testing-library/react';
+import { useParams } from 'react-router-dom-v5-compat';
+import { type Props } from 'react-virtualized-auto-sizer';
+import { makeDataSourceSettings } from 'test/helpers/makeDataSourceSettings';
+import {
+  type DataSourceFallbackWatcher,
+  seedDataSources,
+  watchDataSourceFallbacks,
+} from 'test/helpers/seedDataSources';
+import { MockDataSourceApi } from 'test/mocks/datasource_srv';
+import { render } from 'test/test-utils';
+
+import { locationService, setPluginLinksHook } from '@grafana/runtime';
+import { defaultSpec } from '@grafana/schema/apis/dashboard.grafana.app/v2';
+import { DashboardRoutes } from 'app/types/dashboard';
+
+import DashboardPageProxy, { type DashboardPageProxyProps } from './DashboardPageProxy';
+
+jest.mock('@grafana/runtime', () => ({
+  ...jest.requireActual('@grafana/runtime'),
+  useChromeHeaderHeight: jest.fn(),
+  getBackendSrv: () => {
+    return {
+      get: jest.fn().mockResolvedValue({
+        apiVersion: 'dashboard.grafana.app/v2beta1',
+        kind: 'DashboardWithAccessInfo',
+        metadata: {
+          name: 'abc-def',
+          generation: 1,
+          creationTimestamp: '2024-01-01T00:00:00Z',
+          annotations: {},
+        },
+        spec: defaultSpec(),
+        access: {},
+      }),
+    };
+  },
+}));
+
+jest.mock('react-virtualized-auto-sizer', () => {
+  return ({ children }: Props) =>
+    children({
+      height: 1,
+      scaledHeight: 1,
+      scaledWidth: 1,
+      width: 1,
+    });
+});
+
+setPluginLinksHook(() => ({ links: [], isLoading: false }));
+
+jest.mock('react-router-dom-v5-compat', () => ({
+  ...jest.requireActual('react-router-dom-v5-compat'),
+  useParams: jest.fn().mockReturnValue({}),
+}));
+
+function setup(props: Partial<DashboardPageProxyProps> & { uid?: string }) {
+  (useParams as jest.Mock).mockReturnValue({ uid: props.uid });
+  return render(
+    <DashboardPageProxy
+      location={locationService.getLocation()}
+      queryParams={{}}
+      route={{ routeName: DashboardRoutes.Home, component: () => null, path: '/' }}
+      {...props}
+    />
+  );
+}
+
+let dataSourceFallbacks: DataSourceFallbackWatcher;
+
+beforeEach(() => {
+  dataSourceFallbacks = watchDataSourceFallbacks();
+});
+
+afterEach(() => {
+  dataSourceFallbacks.expectNoFallbacks(['instance', 'settings', 'list']);
+});
+
+describe('DashboardPageProxy', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    const grafanaSettings = makeDataSourceSettings('-- Grafana --', 'Grafana', 'grafana');
+    seedDataSources([{ settings: grafanaSettings, api: new MockDataSourceApi(grafanaSettings) }], {
+      legacySrv: 'mock',
+    });
+  });
+
+  it('should render DashboardScenePage for home route', async () => {
+    setup({
+      route: { routeName: DashboardRoutes.Home, component: () => null, path: '/' },
+    });
+
+    await waitFor(() => {
+      expect(screen.queryAllByTestId('dashboard-scene-page')).toHaveLength(1);
+    });
+  });
+
+  it('should render DashboardScenePage for normal route with uid', async () => {
+    setup({
+      route: { routeName: DashboardRoutes.Normal, component: () => null, path: '/' },
+      uid: 'abc-def',
+    });
+
+    await waitFor(() => {
+      expect(screen.queryAllByTestId('dashboard-scene-page')).toHaveLength(1);
+    });
+  });
+});

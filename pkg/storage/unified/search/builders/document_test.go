@@ -1,0 +1,300 @@
+package builders
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	iam "github.com/grafana/grafana/apps/iam/pkg/apis"
+	iamv0 "github.com/grafana/grafana/apps/iam/pkg/apis/iam/v0alpha1"
+	"github.com/grafana/grafana/pkg/apimachinery/utils"
+	"github.com/grafana/grafana/pkg/services/store/kind/dashboard"
+	"github.com/grafana/grafana/pkg/storage/unified/resource"
+	"github.com/grafana/grafana/pkg/storage/unified/resourcepb"
+)
+
+func doSnapshotTests(t *testing.T, builder resource.DocumentBuilder, kind string, key *resourcepb.ResourceKey, names []string) {
+	t.Helper()
+
+	for _, name := range names {
+		key.Name = name
+		prefix := fmt.Sprintf("%s-%s", kind, key.Name)
+		t.Run(prefix, func(t *testing.T) {
+			// nolint:gosec
+			in, err := os.ReadFile(filepath.Join("testdata", "doc", prefix+".json"))
+			require.NoError(t, err)
+
+			doc, err := builder.BuildDocument(context.Background(), key, int64(1234), in)
+			require.NoError(t, err)
+
+			out, err := json.MarshalIndent(doc, "", "  ")
+			require.NoError(t, err)
+
+			outpath := filepath.Join("testdata", "doc", prefix+"-out.json")
+
+			// nolint:gosec
+			expect, _ := os.ReadFile(outpath)
+			if !assert.JSONEq(t, string(expect), string(out)) {
+				err = os.WriteFile(outpath, out, 0600) // #nosec G703 -- test golden-file regeneration on controlled path
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+// iamTestRegistry seeds a registry with the IAM kinds' fields so the
+// registry-backed builders extract them, as they do in production.
+func iamTestRegistry(t *testing.T) *resource.SearchFieldsRegistry {
+	t.Helper()
+	sel, hashes, providers, err := resource.SearchFieldsForManifests(iam.LocalManifest().ManifestData)
+	require.NoError(t, err)
+	return resource.NewSearchFieldsRegistry(sel, hashes, providers)
+}
+
+func TestUserDocumentBuilder(t *testing.T) {
+	info, err := GetUserBuilder(iamTestRegistry(t))
+	require.NoError(t, err)
+	doSnapshotTests(t, info.Builder, "user", &resourcepb.ResourceKey{
+		Namespace: "default",
+		Group:     "iam.grafana.app",
+		Resource:  "users",
+	}, []string{
+		"with-login-and-email",
+		"with-login-only",
+		"with-last-seen-at-and-role",
+	})
+}
+
+func TestExternalGroupMappingDocumentBuilder(t *testing.T) {
+	info, err := GetExternalGroupMappingBuilder(iamTestRegistry(t))
+	require.NoError(t, err)
+	doSnapshotTests(t, info.Builder, "external_group_mapping", &resourcepb.ResourceKey{
+		Namespace: "default",
+		Group:     "iam.grafana.app",
+		Resource:  "externalgroupmappings",
+	}, []string{
+		"mapping-with-team-and-group",
+	})
+}
+
+func TestTeamSearchBuilder(t *testing.T) {
+	info, err := GetTeamSearchBuilder(iamTestRegistry(t))
+	require.NoError(t, err)
+	doSnapshotTests(t, info.Builder, "team", &resourcepb.ResourceKey{
+		Namespace: "default",
+		Group:     "iam.grafana.app",
+		Resource:  "teams",
+	}, []string{
+		"with-email-and-external-uid",
+		"with-members-and-groups",
+	})
+}
+
+func TestTeamBindingSearchBuilder(t *testing.T) {
+	info, err := GetTeamBindingBuilder(iamTestRegistry(t))
+	require.NoError(t, err)
+	doSnapshotTests(t, info.Builder, "team_binding", &resourcepb.ResourceKey{
+		Namespace: "default",
+		Group:     "iam.grafana.app",
+		Resource:  "teambindings",
+	}, []string{
+		"with-team-and-user",
+	})
+}
+
+func TestDashboardDocumentBuilder(t *testing.T) {
+	key := &resourcepb.ResourceKey{
+		Namespace: "default",
+		Group:     "dashboard.grafana.app",
+		Resource:  "dashboards",
+	}
+
+	info, err := DashboardBuilder(func(ctx context.Context, namespace string, blob resource.BlobSupport) (resource.DocumentBuilder, error) {
+		return &DashboardDocumentBuilder{
+			Namespace: namespace,
+			Blob:      blob,
+			Stats: map[string]map[string]int64{
+				"aaa": {
+					DASHBOARD_ERRORS_LAST_1_DAYS: 1,
+					DASHBOARD_ERRORS_LAST_7_DAYS: 1,
+				},
+			},
+			DatasourceLookup: dashboard.CreateDatasourceLookup([]*dashboard.DatasourceQueryResult{{
+				Name: "TheDisplayName",
+				Type: "my-custom-plugin",
+				UID:  "DSUID",
+			}}),
+		}, nil
+	})
+	require.NoError(t, err)
+
+	builder, err := info.Namespaced(context.Background(), key.Namespace, nil)
+	require.NoError(t, err)
+
+	doSnapshotTests(t, builder, "dashboard", key, []string{
+		"aaa",
+	})
+
+	builder = resource.StandardDocumentBuilder(nil)
+	doSnapshotTests(t, builder, "folder", &resourcepb.ResourceKey{
+		Namespace: "default",
+		Group:     "folder.grafana.app",
+		Resource:  "folders",
+	}, []string{
+		"aaa",
+		"bbb",
+	})
+	doSnapshotTests(t, builder, "playlist", &resourcepb.ResourceKey{
+		Namespace: "default",
+		Group:     "playlist.grafana.app",
+		Resource:  "playlists",
+	}, []string{
+		"aaa",
+	})
+	doSnapshotTests(t, builder, "report", &resourcepb.ResourceKey{
+		Namespace: "default",
+		Group:     "reporting.grafana.app",
+		Resource:  "reports",
+	}, []string{
+		"aaa",
+	})
+}
+
+type stalledDashboardBlob struct {
+	resource.BlobSupport
+	err error
+}
+
+func (b stalledDashboardBlob) GetResourceBlob(ctx context.Context, _ *resourcepb.ResourceKey, _ *utils.BlobInfo, _ bool) (*resourcepb.GetBlobResponse, error) {
+	if _, ok := ctx.Deadline(); !ok {
+		return nil, fmt.Errorf("missing blob read deadline")
+	}
+	<-ctx.Done()
+	if b.err != nil {
+		return nil, b.err
+	}
+	return nil, ctx.Err()
+}
+
+func TestDashboardDocumentBuilderBlobReadDeadline(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		parentTimeout time.Duration
+		blobErr       error
+	}{
+		{name: "default deadline"},
+		{name: "shorter parent deadline", parentTimeout: time.Second},
+		{name: "preserves blob error", blobErr: errors.New("blob read failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx := t.Context()
+				want := dashboardBlobReadTimeout
+				if tc.parentTimeout > 0 {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithTimeout(ctx, tc.parentTimeout)
+					defer cancel()
+					want = tc.parentTimeout
+				}
+				blob := (&utils.BlobInfo{UID: "body", Size: 1}).String()
+				value := fmt.Appendf(nil, `{"metadata":{"name":"dashboard","annotations":{%q:%q}}}`, utils.AnnoKeyBlob, blob)
+				builder := &DashboardDocumentBuilder{Blob: stalledDashboardBlob{err: tc.blobErr}}
+				start := time.Now()
+				doc, err := builder.BuildDocument(ctx, &resourcepb.ResourceKey{Name: "dashboard"}, 1, value)
+				require.Nil(t, doc)
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+				if tc.blobErr != nil {
+					require.ErrorIs(t, err, tc.blobErr)
+				}
+				require.Equal(t, want, time.Since(start))
+			})
+		})
+	}
+}
+
+func BenchmarkDashboardBuildDocument(b *testing.B) {
+	key := &resourcepb.ResourceKey{
+		Namespace: "default",
+		Group:     "dashboard.grafana.app",
+		Resource:  "dashboards",
+		Name:      "aaa",
+	}
+
+	info, err := DashboardBuilder(func(ctx context.Context, namespace string, blob resource.BlobSupport) (resource.DocumentBuilder, error) {
+		return &DashboardDocumentBuilder{
+			Namespace:        namespace,
+			Blob:             blob,
+			DatasourceLookup: dashboard.CreateDatasourceLookup([]*dashboard.DatasourceQueryResult{{}}),
+		}, nil
+	})
+	require.NoError(b, err)
+
+	builder, err := info.Namespaced(context.Background(), key.Namespace, nil)
+	require.NoError(b, err)
+
+	data, err := os.ReadFile(filepath.Join("testdata", "doc", "dashboard-aaa.json"))
+	require.NoError(b, err)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		_, err := builder.BuildDocument(context.Background(), key, 1234, data)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestBuildSelectableFields(t *testing.T) {
+	tb := &iamv0.TeamBinding{}
+	tb.Spec.Subject.Name = "subject name"
+	tb.Spec.TeamRef.Name = "teamref name"
+	tb.Spec.External = true
+
+	expected := map[string]string{
+		"spec.subject.name": "subject name",
+		"spec.teamRef.name": "teamref name",
+		"spec.external":     "true",
+	}
+
+	res, err := BuildSelectableFields(tb, iamv0.TeamBindingKind())
+	require.NoError(t, err)
+	require.Equal(t, expected, res)
+
+	// Test passing mixed type and kind.
+	user := &iamv0.User{}
+	_, err = BuildSelectableFields(user, iamv0.TeamBindingKind())
+	require.Error(t, err)
+}
+
+func TestUserDocumentBuilder_Created(t *testing.T) {
+	info, err := GetUserBuilder(iamTestRegistry(t))
+	require.NoError(t, err)
+
+	value := []byte(`{
+		"apiVersion": "iam.grafana.app/v0alpha1",
+		"kind": "User",
+		"metadata": {
+			"name": "uid-1",
+			"creationTimestamp": "2024-01-02T03:04:05Z"
+		},
+		"spec": {"login": "jdoe", "email": "jdoe@example.com", "role": "Admin"}
+	}`)
+
+	doc, err := info.Builder.BuildDocument(context.Background(),
+		&resourcepb.ResourceKey{Namespace: "default", Group: "iam.grafana.app", Resource: "users", Name: "uid-1"},
+		1, value)
+	require.NoError(t, err)
+
+	// The creation timestamp is carried on the standard created field.
+	assert.Equal(t, time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC).UnixMilli(), doc.Created)
+}

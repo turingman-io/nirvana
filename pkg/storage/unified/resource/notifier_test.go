@@ -1,0 +1,884 @@
+package resource
+
+import (
+	"context"
+	"fmt"
+	"iter"
+	"slices"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/grafana/grafana-app-sdk/logging"
+	"github.com/grafana/grafana/pkg/storage/unified/resource/kv"
+	"github.com/grafana/grafana/pkg/util/testutil"
+)
+
+func setupTestNotifier(t *testing.T) (*pollingNotifier, *eventStore) {
+	eventStore := newEventStore(setupBadgerKV(t))
+	notifier := newNotifier(eventStore, notifierOptions{log: &logging.NoOpLogger{}})
+	return notifier.(*pollingNotifier), eventStore
+}
+
+func setupTestNotifierSqlKv(t *testing.T) (*pollingNotifier, *eventStore) {
+	eventStore := newEventStore(setupSqlKV(t))
+	notifier := newNotifier(eventStore, notifierOptions{log: &logging.NoOpLogger{}})
+	return notifier.(*pollingNotifier), eventStore
+}
+
+func TestIntegrationNewNotifier(t *testing.T) {
+	testutil.SkipIntegrationTestInShortMode(t)
+
+	notifier, _ := setupTestNotifier(t)
+
+	assert.NotNil(t, notifier.eventStore)
+}
+
+func TestNewNotifierSelection(t *testing.T) {
+	nop := &logging.NoOpLogger{}
+
+	t.Run("nats notifier when requested with an enabled subscriber", func(t *testing.T) {
+		n := newNotifier(nil, notifierOptions{
+			log:                nop,
+			enableNatsNotifier: true,
+			eventSubscriber:    &fakeEventSubscriber{enabled: true},
+		})
+		assert.IsType(t, &natsNotifier{}, n)
+	})
+
+	t.Run("nats takes precedence over channel notifier", func(t *testing.T) {
+		n := newNotifier(nil, notifierOptions{
+			log:                nop,
+			enableNatsNotifier: true,
+			useChannelNotifier: true,
+			eventSubscriber:    &fakeEventSubscriber{enabled: true},
+		})
+		assert.IsType(t, &natsNotifier{}, n)
+	})
+
+	t.Run("falls back to polling when subscriber is disabled", func(t *testing.T) {
+		n := newNotifier(nil, notifierOptions{
+			log:                nop,
+			enableNatsNotifier: true,
+			eventSubscriber:    &fakeEventSubscriber{enabled: false},
+		})
+		assert.IsType(t, &pollingNotifier{}, n)
+	})
+
+	t.Run("falls back to polling when subscriber is nil", func(t *testing.T) {
+		n := newNotifier(nil, notifierOptions{log: nop, enableNatsNotifier: true})
+		assert.IsType(t, &pollingNotifier{}, n)
+	})
+
+	t.Run("channel notifier when requested without nats", func(t *testing.T) {
+		n := newNotifier(nil, notifierOptions{log: nop, useChannelNotifier: true})
+		assert.IsType(t, &channelNotifier{}, n)
+	})
+
+	t.Run("polling notifier by default", func(t *testing.T) {
+		n := newNotifier(nil, notifierOptions{log: nop})
+		assert.IsType(t, &pollingNotifier{}, n)
+	})
+}
+
+func TestWatchOptionsNormalize(t *testing.T) {
+	var opts WatchOptions
+	opts = opts.normalize()
+
+	assert.Equal(t, defaultSettleDelay, opts.SettleDelay)
+	assert.Equal(t, defaultBufferSize, opts.BufferSize)
+	assert.Equal(t, defaultMinBackoff, opts.MinBackoff)
+	assert.Equal(t, defaultMaxBackoff, opts.MaxBackoff)
+}
+
+func runNotifierTestWith(t *testing.T, storeName string, newStoreFn func(*testing.T) (*pollingNotifier, *eventStore), testFn func(*testing.T, context.Context, *pollingNotifier, *eventStore)) {
+	t.Run(storeName, func(t *testing.T) {
+		ctx := context.Background()
+		notifier, eventStore := newStoreFn(t)
+		testFn(t, ctx, notifier, eventStore)
+	})
+}
+
+func TestIntegrationNotifier_lastEventResourceVersion(t *testing.T) {
+	testutil.SkipIntegrationTestInShortMode(t)
+
+	runNotifierTestWith(t, "badger", setupTestNotifier, testNotifierLastEventResourceVersion)
+	runNotifierTestWith(t, "sqlkv", setupTestNotifierSqlKv, testNotifierLastEventResourceVersion)
+}
+
+func testNotifierLastEventResourceVersion(t *testing.T, ctx context.Context, notifier *pollingNotifier, eventStore *eventStore) {
+	// Test with no events
+	rv, err := notifier.lastEventResourceVersion(ctx)
+	assert.Error(t, err)
+	assert.ErrorIs(t, ErrNotFound, err)
+	assert.Equal(t, int64(0), rv)
+
+	// Save an event
+	event := Event{
+		Namespace:       "default",
+		Group:           "apps",
+		Resource:        "resource",
+		Name:            "test-resource",
+		ResourceVersion: 1000,
+		Action:          DataActionCreated,
+		Folder:          "test-folder",
+		PreviousRV:      999,
+	}
+	err = eventStore.Save(ctx, event)
+	require.NoError(t, err)
+
+	// Test with events
+	rv, err = notifier.lastEventResourceVersion(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1000), rv)
+
+	// Save another event with higher RV
+	event2 := Event{
+		Namespace:       "default",
+		Group:           "apps",
+		Resource:        "resource",
+		Name:            "test-resource-2",
+		ResourceVersion: 2000,
+		Action:          DataActionCreated,
+		Folder:          "test-folder",
+		PreviousRV:      1000,
+	}
+	err = eventStore.Save(ctx, event2)
+	require.NoError(t, err)
+
+	// Should return the higher RV
+	rv, err = notifier.lastEventResourceVersion(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2000), rv)
+}
+
+func TestIntegrationNotifier_Watch_NoEvents(t *testing.T) {
+	testutil.SkipIntegrationTestInShortMode(t)
+
+	runNotifierTestWith(t, "badger", setupTestNotifier, testNotifierWatchNoEvents)
+	runNotifierTestWith(t, "sqlkv", setupTestNotifierSqlKv, testNotifierWatchNoEvents)
+}
+
+func testNotifierWatchNoEvents(t *testing.T, ctx context.Context, notifier *pollingNotifier, eventStore *eventStore) {
+	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+
+	// Add at least one event so that lastEventResourceVersion doesn't return ErrNotFound
+	initialEvent := Event{
+		Namespace:       "default",
+		Group:           "apps",
+		Resource:        "resource",
+		Name:            "initial-resource",
+		ResourceVersion: snowflakeFromTime(time.Now().Add(-2 * time.Second)),
+		Action:          DataActionCreated,
+		Folder:          "test-folder",
+		PreviousRV:      0,
+	}
+	err := eventStore.Save(ctx, initialEvent)
+	require.NoError(t, err)
+
+	opts := WatchOptions{
+		SettleDelay: 50 * time.Millisecond,
+		BufferSize:  10,
+		MinBackoff:  50 * time.Millisecond,
+		MaxBackoff:  500 * time.Millisecond,
+	}
+
+	events := notifier.Watch(ctx, opts)
+
+	// Should receive no new events (only events after initial RV should be sent)
+	select {
+	case event := <-events:
+		t.Fatalf("Expected no events, but got: %+v", event)
+	case <-ctx.Done():
+		// Expected - context timeout
+	}
+}
+
+func TestIntegrationNotifier_Watch_WithExistingEvents(t *testing.T) {
+	testutil.SkipIntegrationTestInShortMode(t)
+
+	runNotifierTestWith(t, "badger", setupTestNotifier, testNotifierWatchWithExistingEvents)
+	runNotifierTestWith(t, "sqlkv", setupTestNotifierSqlKv, testNotifierWatchWithExistingEvents)
+}
+
+func testNotifierWatchWithExistingEvents(t *testing.T, ctx context.Context, notifier *pollingNotifier, eventStore *eventStore) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	now := time.Now()
+
+	// Save some initial events
+	initialEvents := []Event{
+		{
+			Namespace:       "default",
+			Group:           "apps",
+			Resource:        "resource",
+			Name:            "test-resource-1",
+			ResourceVersion: snowflakeFromTime(now.Add(-4 * time.Second)),
+			Action:          DataActionCreated,
+			Folder:          "test-folder",
+			PreviousRV:      0,
+		},
+		{
+			Namespace:       "default",
+			Group:           "apps",
+			Resource:        "resource",
+			Name:            "test-resource-2",
+			ResourceVersion: snowflakeFromTime(now.Add(-3 * time.Second)),
+			Action:          DataActionUpdated,
+			Folder:          "test-folder",
+			PreviousRV:      snowflakeFromTime(now.Add(-4 * time.Second)),
+		},
+	}
+
+	for _, event := range initialEvents {
+		err := eventStore.Save(ctx, event)
+		require.NoError(t, err)
+	}
+
+	opts := WatchOptions{
+		SettleDelay: 50 * time.Millisecond,
+		BufferSize:  10,
+		MinBackoff:  50 * time.Millisecond,
+		MaxBackoff:  500 * time.Millisecond,
+	}
+
+	// Start watching
+	events := notifier.Watch(ctx, opts)
+
+	// Save a new event after starting to watch, using a snowflake-based RV
+	newEvent := Event{
+		Namespace:       "default",
+		Group:           "apps",
+		Resource:        "resource",
+		Name:            "test-resource-3",
+		ResourceVersion: snowflakeFromTime(now.Add(-2 * time.Second)),
+		Action:          DataActionCreated,
+		Folder:          "test-folder",
+		PreviousRV:      snowflakeFromTime(now.Add(-3 * time.Second)),
+	}
+
+	err := eventStore.Save(ctx, newEvent)
+	require.NoError(t, err)
+
+	// Should receive the new event after settle delay
+	select {
+	case receivedEvent := <-events:
+		assert.Equal(t, newEvent.Name, receivedEvent.Name)
+		assert.Equal(t, newEvent.ResourceVersion, receivedEvent.ResourceVersion)
+		assert.Equal(t, newEvent.Action, receivedEvent.Action)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Expected to receive an event, but timed out")
+	}
+}
+
+func TestIntegrationNotifier_Watch_ContextCancellation(t *testing.T) {
+	testutil.SkipIntegrationTestInShortMode(t)
+
+	runNotifierTestWith(t, "badger", setupTestNotifier, testNotifierWatchContextCancellation)
+	runNotifierTestWith(t, "sqlkv", setupTestNotifierSqlKv, testNotifierWatchContextCancellation)
+}
+
+func testNotifierWatchContextCancellation(t *testing.T, ctx context.Context, notifier *pollingNotifier, eventStore *eventStore) {
+	ctx, cancel := context.WithCancel(ctx)
+
+	// Add an initial event so that lastEventResourceVersion doesn't return ErrNotFound
+	initialEvent := Event{
+		Namespace:       "default",
+		Group:           "apps",
+		Resource:        "resource",
+		Name:            "initial-resource",
+		ResourceVersion: snowflakeFromTime(time.Now().Add(-2 * time.Second)),
+		Action:          DataActionCreated,
+		Folder:          "test-folder",
+		PreviousRV:      0,
+	}
+	err := eventStore.Save(ctx, initialEvent)
+	require.NoError(t, err)
+
+	opts := WatchOptions{
+		SettleDelay: 50 * time.Millisecond,
+		BufferSize:  10,
+		MinBackoff:  20 * time.Millisecond,
+		MaxBackoff:  200 * time.Millisecond,
+	}
+
+	events := notifier.Watch(ctx, opts)
+
+	// Cancel the context
+	cancel()
+
+	// Channel should be closed
+	select {
+	case event, ok := <-events:
+		if ok {
+			t.Fatalf("Expected channel to be closed, but got event: %+v", event)
+		}
+		// Channel is closed as expected
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Expected channel to be closed quickly after context cancellation")
+	}
+}
+
+func TestIntegrationNotifier_Watch_MultipleEvents(t *testing.T) {
+	testutil.SkipIntegrationTestInShortMode(t)
+
+	runNotifierTestWith(t, "badger", setupTestNotifier, testNotifierWatchMultipleEvents)
+	runNotifierTestWith(t, "sqlkv", setupTestNotifierSqlKv, testNotifierWatchMultipleEvents)
+}
+
+func testNotifierWatchMultipleEvents(t *testing.T, ctx context.Context, notifier *pollingNotifier, eventStore *eventStore) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	now := time.Now()
+
+	// Add an initial event so that lastEventResourceVersion doesn't return ErrNotFound.
+	initialRV := snowflakeFromTime(now.Add(-5 * time.Second))
+	initialEvent := Event{
+		Namespace:       "default",
+		Group:           "apps",
+		Resource:        "resource",
+		Name:            "initial-resource",
+		ResourceVersion: initialRV,
+		Action:          DataActionCreated,
+		Folder:          "test-folder",
+		PreviousRV:      0,
+	}
+	err := eventStore.Save(ctx, initialEvent)
+	require.NoError(t, err)
+
+	opts := WatchOptions{
+		SettleDelay: 50 * time.Millisecond,
+		BufferSize:  10,
+		MinBackoff:  20 * time.Millisecond,
+		MaxBackoff:  200 * time.Millisecond,
+	}
+
+	// Start watching
+	events := notifier.Watch(ctx, opts)
+
+	// Save multiple events
+	// Resource-3 is saved last but has a lower RV than resource-2 (out of order on purpose).
+	rv1 := snowflakeFromTime(now.Add(-4 * time.Second))
+	rv2 := snowflakeFromTime(now.Add(-2 * time.Second))
+	rv3 := snowflakeFromTime(now.Add(-3 * time.Second))
+	testEvents := []Event{
+		{
+			Namespace:       "default",
+			Group:           "apps",
+			Resource:        "resource",
+			Name:            "test-resource-1",
+			ResourceVersion: rv1,
+			Action:          DataActionCreated,
+			Folder:          "test-folder",
+			PreviousRV:      0,
+		},
+		{
+			Namespace:       "default",
+			Group:           "apps",
+			Resource:        "resource",
+			Name:            "test-resource-2",
+			ResourceVersion: rv2,
+			Action:          DataActionUpdated,
+			Folder:          "test-folder",
+			PreviousRV:      rv1,
+		},
+		{
+			Namespace:       "default",
+			Group:           "apps",
+			Resource:        "resource",
+			Name:            "test-resource-3",
+			ResourceVersion: rv3,
+			Action:          DataActionDeleted,
+			Folder:          "test-folder",
+			PreviousRV:      rv1,
+		},
+	}
+
+	errCh := make(chan error)
+	go func() {
+		for _, event := range testEvents {
+			errCh <- eventStore.Save(ctx, event)
+		}
+	}()
+
+	// Receive events
+	receivedEvents := make([]string, 0, len(testEvents))
+	for len(receivedEvents) != len(testEvents) {
+		select {
+		case event := <-events:
+			receivedEvents = append(receivedEvents, event.Name)
+		case err := <-errCh:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("Timed out waiting for event %d", len(receivedEvents)+1)
+		}
+	}
+
+	// Verify events are emitted sorted by resource version (ascending).
+	// resource-1 (rv1, -4s) < resource-3 (rv3, -3s) < resource-2 (rv2, -2s)
+	expectedNames := []string{"test-resource-1", "test-resource-3", "test-resource-2"}
+	assert.Equal(t, expectedNames, receivedEvents)
+}
+
+func TestIntegrationNotifier_Watch_EventPages(t *testing.T) {
+	testutil.SkipIntegrationTestInShortMode(t)
+	for _, failBatch := range []bool{false, true} {
+		t.Run(fmt.Sprintf("batch failure=%t", failBatch), func(t *testing.T) {
+			test := func(t *testing.T, ctx context.Context, notifier *pollingNotifier, store *eventStore) {
+				ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				defer cancel()
+				initial := eventStoreTestEvents(1)[0]
+				initial.ResourceVersion = snowflakeFromTime(time.Now().Add(-time.Minute))
+				require.NoError(t, store.Save(ctx, initial))
+
+				seeded := make(chan struct{})
+				probe := &eventStoreKVProbe{KV: store.kv, t: t}
+				probe.keys = func(ctx context.Context, section string, opts ListOptions) iter.Seq2[string, error] {
+					return func(yield func(string, error) bool) {
+						if opts.Sort == SortOrderAsc {
+							select {
+							case <-seeded:
+							case <-ctx.Done():
+								yield("", ctx.Err())
+								return
+							}
+						}
+						store.kv.Keys(ctx, section, opts)(yield)
+					}
+				}
+				probe.batch = func(ctx context.Context, section string, keys []string) iter.Seq2[kv.KeyValue, error] {
+					if failBatch && len(probe.batches) == 2 {
+						return func(yield func(kv.KeyValue, error) bool) {
+							yield(kv.KeyValue{}, fmt.Errorf("temporary batch failure"))
+						}
+					}
+					return store.kv.BatchGet(ctx, section, keys)
+				}
+				notifier.eventStore = newEventStore(probe)
+				ch := notifier.Watch(ctx, WatchOptions{
+					SettleDelay: time.Millisecond, BufferSize: 1,
+					MinBackoff: time.Millisecond, MaxBackoff: 10 * time.Millisecond,
+				})
+				defer func() {
+					cancel()
+					for range ch {
+					}
+					probe.assertClosed()
+				}()
+
+				expected := eventStoreTestEvents(623)
+				for i := range expected {
+					expected[i].ResourceVersion += initial.ResourceVersion
+				}
+				for _, event := range slices.Backward(expected) {
+					require.NoError(t, store.Save(ctx, event))
+				}
+				close(seeded)
+				for _, event := range expected {
+					select {
+					case actual, ok := <-ch:
+						require.True(t, ok)
+						require.Equal(t, event, actual)
+					case <-ctx.Done():
+						t.Fatal("timed out waiting for paged events")
+					}
+				}
+
+				// A later event forces another poll through the inclusive lower bound.
+				last := expected[len(expected)-1]
+				last.ResourceVersion++
+				require.NoError(t, store.Save(ctx, last))
+				select {
+				case actual, ok := <-ch:
+					require.True(t, ok)
+					require.Equal(t, last, actual, "polling must not re-emit the previous page")
+				case <-ctx.Done():
+					t.Fatal("timed out waiting for the next poll")
+				}
+				cancel()
+				for event := range ch {
+					t.Errorf("unexpected extra event: %+v", event)
+				}
+				require.Zero(t, probe.gets)
+				require.GreaterOrEqual(t, len(probe.batches), 14)
+				for _, batch := range probe.batches {
+					require.LessOrEqual(t, len(batch), 50)
+				}
+			}
+			runNotifierTestWith(t, "badger", setupTestNotifier, test)
+			runNotifierTestWith(t, "sqlkv", setupTestNotifierSqlKv, test)
+		})
+	}
+}
+
+func TestChannelNotifier(t *testing.T) {
+	log := &logging.NoOpLogger{}
+
+	var eventCount int64
+	newEvent := func() Event {
+		eventCount++
+		return Event{
+			Namespace:       "default",
+			Group:           "playlists.grafana.app",
+			Resource:        "playlists",
+			Name:            fmt.Sprintf("playlist_%d", eventCount),
+			ResourceVersion: eventCount,
+			Action:          "created",
+		}
+	}
+
+	// Use a very short settle delay for unit tests so events are emitted immediately
+	// after the buffering goroutine processes them.
+	opts := WatchOptions{BufferSize: 5, SettleDelay: 1 * time.Millisecond, MinBackoff: 1 * time.Millisecond}
+
+	t.Run("events are received", func(t *testing.T) {
+		notifier := newChannelNotifier(log)
+		watcher := notifier.Watch(t.Context(), opts)
+
+		event := newEvent()
+		notifier.Publish(event)
+		mustReceiveTimeout(t, watcher, event)
+		mustNotReceive(t, watcher)
+	})
+
+	t.Run("multiple events are received in order", func(t *testing.T) {
+		notifier := newChannelNotifier(log)
+		watcher := notifier.Watch(t.Context(), opts)
+
+		events := []Event{newEvent(), newEvent(), newEvent()}
+		for _, event := range events {
+			notifier.Publish(event)
+		}
+
+		for _, event := range events {
+			mustReceiveTimeout(t, watcher, event)
+		}
+
+		mustNotReceive(t, watcher)
+	})
+
+	t.Run("multiple watchers and multiple events", func(t *testing.T) {
+		notifier := newChannelNotifier(log)
+
+		watcher1 := notifier.Watch(t.Context(), opts)
+		watcher2 := notifier.Watch(t.Context(), opts)
+		watcher3 := notifier.Watch(t.Context(), opts)
+
+		events := []Event{newEvent(), newEvent(), newEvent()}
+		for _, event := range events {
+			notifier.Publish(event)
+		}
+
+		for _, event := range events {
+			mustReceiveTimeout(t, watcher1, event)
+			mustReceiveTimeout(t, watcher2, event)
+			mustReceiveTimeout(t, watcher3, event)
+		}
+
+		mustNotReceive(t, watcher1)
+		mustNotReceive(t, watcher2)
+		mustNotReceive(t, watcher3)
+	})
+
+	t.Run("continues to receive events", func(t *testing.T) {
+		notifier := newChannelNotifier(log)
+		watcher := notifier.Watch(t.Context(), opts)
+
+		events := []Event{newEvent(), newEvent(), newEvent()}
+		for _, event := range events {
+			notifier.Publish(event)
+		}
+
+		for _, event := range events {
+			mustReceiveTimeout(t, watcher, event)
+		}
+
+		mustNotReceive(t, watcher)
+
+		nextEvent := newEvent()
+		notifier.Publish(nextEvent)
+		mustReceiveTimeout(t, watcher, nextEvent)
+		mustNotReceive(t, watcher)
+	})
+
+	t.Run("publishing more than the buffer size", func(t *testing.T) {
+		notifier := newChannelNotifier(log)
+		watcher := notifier.Watch(t.Context(), opts)
+
+		const numEvents = 10
+		events := make([]Event, numEvents)
+		for j := range 10 {
+			events[j] = newEvent()
+		}
+
+		// Some events may be dropped if the buffer is full.
+		for _, e := range events {
+			notifier.Publish(e)
+		}
+
+		// At least first 5 (bufferSize) events are received.
+		mustReceiveTimeout(t, watcher, events[0])
+		mustReceiveTimeout(t, watcher, events[1])
+		mustReceiveTimeout(t, watcher, events[2])
+		mustReceiveTimeout(t, watcher, events[3])
+		mustReceiveTimeout(t, watcher, events[4])
+	})
+
+	t.Run("canceling the context stops event publishing", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			notifier := newChannelNotifier(log)
+
+			ctx, stop := context.WithCancel(t.Context())
+			watcher := notifier.Watch(ctx, opts)
+
+			event := newEvent()
+			event.ResourceVersion = snowflakeFromTime(time.Now())
+			notifier.Publish(event)
+
+			// Advance synctest's time past the settle delay plus
+			// the ticker period so the event is emitted.
+			time.Sleep(opts.SettleDelay + 1*time.Second)
+			synctest.Wait()
+			mustReceive(t, watcher, event)
+
+			stop()
+			synctest.Wait() // ensure cancelation is propagated to closing the channel
+
+			notifier.Publish(newEvent())     // shouldn't panic
+			mustReceive(t, watcher, Event{}) // zero value
+
+			_, isOpen := <-watcher
+			require.False(t, isOpen, "channel should be closed after context cancelation")
+		})
+	})
+}
+
+func TestSettleEventsReordersWithinTheWindow(t *testing.T) {
+	for name, rv := range map[string]func(time.Time) int64{
+		"legacy SQL microsecond RVs": func(at time.Time) int64 { return at.UnixMicro() },
+		"KV snowflake RVs":           snowflakeFromTime,
+	} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				// RVs dated an hour behind this instance's clock must not
+				// settle on arrival: the window counts from arrival.
+				synctest.Sleep(time.Until(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)))
+				written := time.Now().Add(-time.Hour)
+				raw := make(chan Event, 10)
+				out := make(chan Event, 10)
+				go settleEvents(t.Context(), raw, out, WatchOptions{SettleDelay: 100 * time.Millisecond})
+
+				later := Event{Group: "g", Resource: "r", Name: "b", ResourceVersion: rv(written.Add(time.Millisecond))}
+				earlier := Event{Group: "g", Resource: "r", Name: "a", ResourceVersion: rv(written)}
+				raw <- later
+				synctest.Sleep(90 * time.Millisecond)
+				raw <- earlier
+
+				synctest.Sleep(20 * time.Millisecond)
+				mustNotReceive(t, out)
+
+				// Both are emitted once the lower RV settles, in RV order.
+				synctest.Sleep(80 * time.Millisecond)
+				mustReceive(t, out, earlier)
+				mustReceive(t, out, later)
+			})
+		})
+	}
+}
+
+func TestSettleEventsKeepsTheGlobalOrderByDefault(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		raw := make(chan Event, 10)
+		out := make(chan Event, 10)
+		go settleEvents(t.Context(), raw, out, WatchOptions{SettleDelay: 100 * time.Millisecond})
+
+		// KV watches advance bookmarks from other collections' events, so a
+		// higher RV must wait for a lower one of another collection.
+		higher := Event{Group: "g", Resource: "other", Name: "x", ResourceVersion: 1000}
+		lower := Event{Group: "g", Resource: "busy", Name: "y", ResourceVersion: 1}
+		raw <- higher
+		synctest.Sleep(50 * time.Millisecond)
+		raw <- lower
+		synctest.Sleep(60 * time.Millisecond)
+		mustNotReceive(t, out)
+		synctest.Sleep(50 * time.Millisecond)
+		mustReceive(t, out, lower)
+		mustReceive(t, out, higher)
+	})
+}
+
+func TestSettleEventsSettlesCollectionsIndependently(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		raw := make(chan Event, 10)
+		out := make(chan Event, 10)
+		go settleEvents(t.Context(), raw, out, WatchOptions{SettleDelay: 100 * time.Millisecond, SettlePerCollection: true})
+
+		// A collection whose lower RVs keep arriving must not hold back a
+		// settled event of another collection.
+		other := Event{Group: "g", Resource: "other", Name: "x", ResourceVersion: 1000}
+		raw <- other
+		busy := func(rv int64) Event {
+			return Event{Group: "g", Resource: "busy", Name: fmt.Sprint(rv), ResourceVersion: rv}
+		}
+		raw <- busy(1)
+		for rv := int64(2); rv <= 5; rv++ {
+			synctest.Sleep(50 * time.Millisecond)
+			raw <- busy(rv)
+			if rv == 3 {
+				// The other collection is out even though busy still has
+				// unsettled events. Queues flush in no particular order, so
+				// busy's settled event may come out first.
+				var got []Event
+				for len(out) > 0 {
+					got = append(got, <-out)
+				}
+				require.Contains(t, got, other)
+			}
+		}
+	})
+}
+
+func TestSettleEventsLateArrivals(t *testing.T) {
+	newEvent := func(resource string, rv int64) Event {
+		return Event{Group: "g", Resource: resource, Name: fmt.Sprint(rv), ResourceVersion: rv}
+	}
+	startWith := func(t *testing.T, opts WatchOptions) (chan<- Event, <-chan Event) {
+		raw := make(chan Event, 10)
+		out := make(chan Event, 10)
+		opts.SettleDelay = 100 * time.Millisecond
+		go settleEvents(t.Context(), raw, out, opts)
+		return raw, out
+	}
+	start := func(t *testing.T, onLate func(Event) bool) (chan<- Event, <-chan Event) {
+		return startWith(t, WatchOptions{OnLate: onLate})
+	}
+	settle := func() { synctest.Sleep(100 * time.Millisecond) }
+
+	t.Run("dropped when OnLate drops them", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var late []Event
+			raw, out := start(t, func(e Event) bool { late = append(late, e); return true })
+
+			raw <- newEvent("r", 20)
+			settle()
+			mustReceive(t, out, newEvent("r", 20))
+
+			raw <- newEvent("r", 10)
+			raw <- newEvent("r", 20)
+			raw <- newEvent("r", 30)
+			settle()
+			mustReceive(t, out, newEvent("r", 30))
+			mustNotReceive(t, out)
+			require.Equal(t, []Event{newEvent("r", 10), newEvent("r", 20)}, late)
+		})
+	})
+
+	t.Run("emitted out of order when OnLate keeps them", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var late []Event
+			raw, out := start(t, func(e Event) bool { late = append(late, e); return false })
+
+			raw <- newEvent("r", 20)
+			settle()
+			mustReceive(t, out, newEvent("r", 20))
+
+			raw <- newEvent("r", 10)
+			settle()
+			mustReceive(t, out, newEvent("r", 10))
+			require.Equal(t, []Event{newEvent("r", 10)}, late)
+		})
+	})
+
+	t.Run("emitted at once without holding back waiting events", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var late []Event
+			raw, out := start(t, func(e Event) bool { late = append(late, e); return false })
+
+			raw <- newEvent("a", 30)
+			settle()
+			mustReceive(t, out, newEvent("a", 30))
+
+			raw <- newEvent("a", 40)
+			synctest.Sleep(50 * time.Millisecond)
+			raw <- newEvent("a", 20)
+			synctest.Wait()
+			mustReceive(t, out, newEvent("a", 20))
+
+			// 40 leaves when its own window ends, not 20's.
+			synctest.Sleep(50 * time.Millisecond)
+			mustReceive(t, out, newEvent("a", 40))
+			require.Equal(t, []Event{newEvent("a", 20)}, late)
+		})
+	})
+
+	t.Run("tracked across collections by default", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var late []Event
+			raw, out := start(t, func(e Event) bool { late = append(late, e); return true })
+
+			raw <- newEvent("a", 20)
+			settle()
+			mustReceive(t, out, newEvent("a", 20))
+
+			// KV RVs are global, so a lower RV of another collection is late.
+			raw <- newEvent("b", 10)
+			settle()
+			mustNotReceive(t, out)
+			require.Equal(t, []Event{newEvent("b", 10)}, late)
+		})
+	})
+
+	t.Run("tracked per collection when settling per collection", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			raw, out := startWith(t, WatchOptions{SettlePerCollection: true, OnLate: func(e Event) bool {
+				t.Errorf("unexpected late event %+v", e)
+				return true
+			}})
+
+			raw <- newEvent("a", 20)
+			settle()
+			mustReceive(t, out, newEvent("a", 20))
+
+			// Legacy SQL collections have their own RV sequences.
+			raw <- newEvent("b", 10)
+			settle()
+			mustReceive(t, out, newEvent("b", 10))
+		})
+	})
+}
+
+func mustReceiveTimeout(t *testing.T, watcher <-chan Event, expected Event) {
+	t.Helper()
+	select {
+	case e := <-watcher:
+		require.Equal(t, expected, e)
+	case <-time.After(2 * time.Second):
+		require.FailNow(t, "timed out waiting for event")
+	}
+}
+
+func mustReceive(t *testing.T, watcher <-chan Event, expected Event) {
+	select {
+	case e := <-watcher:
+		require.Equal(t, expected, e)
+
+	default:
+		require.FailNow(t, "should have received published event")
+	}
+}
+
+func mustNotReceive(t *testing.T, watcher <-chan Event) {
+	select {
+	case e := <-watcher:
+		require.FailNow(t, "no new events should have been received", "extra event: %#v", e)
+
+	default:
+		// pass
+	}
+}

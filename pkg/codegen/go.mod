@@ -1,0 +1,60 @@
+module github.com/grafana/grafana/pkg/codegen
+
+go 1.27.4
+
+require (
+	cuelang.org/go v0.17.1
+	github.com/dave/dst v0.27.4
+	github.com/grafana/codejen v0.0.4
+	github.com/grafana/cog v0.2.4
+	github.com/grafana/cuetsy v0.1.11
+	github.com/matryer/is v1.4.1
+	golang.org/x/tools v0.52.1-0.20261106145633-d407941a339a
+)
+
+require (
+	github.com/cockroachdb/apd/v2 v2.0.2 // indirect
+	github.com/dave/jennifer v1.7.1 // indirect
+	github.com/dlclark/regexp2 v1.12.0 // indirect
+	github.com/emicklei/proto v1.14.3 // indirect
+	github.com/fatih/color v1.19.0 // indirect
+	github.com/getkin/kin-openapi v0.153.0 // indirect
+	github.com/go-openapi/jsonpointer v1.0.2 // indirect
+	github.com/goccy/go-yaml v1.19.2 // indirect
+	github.com/golang/glog v1.2.5 // indirect
+	github.com/golang/protobuf v1.5.4 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/google/uuid v1.6.0 // indirect
+	github.com/hashicorp/go-hclog v1.6.3 // indirect
+	github.com/hashicorp/go-plugin v1.8.0 // indirect
+	github.com/hashicorp/yamux v0.1.2 // indirect
+	github.com/huandu/xstrings v1.6.3 // indirect
+	github.com/kr/pretty v0.3.1 // indirect
+	github.com/kr/text v0.2.0 // indirect
+	github.com/lib/pq v1.12.3 // indirect
+	github.com/mattn/go-colorable v0.1.16 // indirect
+	github.com/mattn/go-isatty v0.0.24 // indirect
+	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
+	github.com/mpvl/unique v0.0.0-20150818121801-cbe035fff7de // indirect
+	github.com/oklog/run v1.2.0 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
+	github.com/protocolbuffers/txtpbfmt v0.0.0-20261013103202-7c8a61a7a736 // indirect
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
+	github.com/sergi/go-diff v1.4.0 // indirect
+	github.com/xlab/treeprint v1.2.0 // indirect
+	go.yaml.in/yaml/v3 v3.0.6 // indirect
+	go.yaml.in/yaml/v4 v4.0.0 // indirect
+	golang.org/x/mod v0.43.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
+	golang.org/x/sync v0.25.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
+	golang.org/x/text v0.44.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20261104224025-d1e00e9f33ab // indirect
+	google.golang.org/grpc v1.85.0 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+)
+
+replace cuelang.org/go => github.com/grafana/cue v0.0.0-20230926092038-971951014e3f // @grafana/grafana-as-code
+
+replace github.com/protocolbuffers/txtpbfmt => github.com/protocolbuffers/txtpbfmt v0.0.0-20220428173112-74888fd59c2b

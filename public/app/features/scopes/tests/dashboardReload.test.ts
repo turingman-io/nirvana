@@ -1,0 +1,106 @@
+import { type DataSourceFallbackWatcher, watchDataSourceFallbacks } from 'test/helpers/seedDataSources';
+
+import { setBackendSrv } from '@grafana/runtime';
+import { FlagKeys } from '@grafana/runtime/internal';
+import { setupMockServer } from '@grafana/test-utils/server';
+import { setTestFlags } from '@grafana/test-utils/unstable';
+import { backendSrv } from 'app/core/services/backend_srv';
+import { setDashboardAPI } from 'app/features/dashboard/api/dashboard_api';
+import { getDashboardScenePageStateManager } from 'app/features/dashboard-scene/pages/DashboardScenePageStateManager';
+
+import { enterEditMode, updateMyVar, updateScopes, updateTimeRange } from './utils/actions';
+import { renderDashboard, resetScenes } from './utils/render';
+
+jest.mock('@grafana/runtime', () => ({
+  __esModule: true,
+  ...jest.requireActual('@grafana/runtime'),
+  useChromeHeaderHeight: jest.fn(),
+  usePluginLinks: jest.fn().mockReturnValue({ links: [] }),
+}));
+
+setBackendSrv(backendSrv);
+setupMockServer();
+
+let dataSourceFallbacks: DataSourceFallbackWatcher;
+
+beforeEach(() => {
+  dataSourceFallbacks = watchDataSourceFallbacks();
+});
+
+afterEach(() => {
+  dataSourceFallbacks.expectNoFallbacks(['instance', 'settings', 'list']);
+});
+
+describe('Dashboard reload', () => {
+  let dashboardReloadSpy: jest.SpyInstance;
+  beforeEach(() => {
+    setTestFlags({ [FlagKeys.ScopeFilters]: true });
+    jest.spyOn(console, 'log').mockImplementation();
+    jest.spyOn(console, 'warn').mockImplementation();
+  });
+  afterEach(() => {
+    setTestFlags({});
+  });
+
+  it.each([
+    [false, false, false, false],
+    [false, false, true, false],
+    [false, true, false, false],
+    [false, true, true, false],
+    [true, false, false, false],
+    [true, false, true, false],
+    [true, true, false, true],
+    [true, true, true, true],
+    [true, true, false, false],
+    [true, true, true, false],
+  ])(
+    `reloadDashboardsOnParamsChange: %s, reloadOnParamsChange: %s, withUid: %s, editMode: %s`,
+    async (reloadDashboardsOnParamsChange, reloadOnParamsChange, withUid, editMode) => {
+      setTestFlags({ [FlagKeys.ScopeFilters]: true, reloadDashboardsOnParamsChange });
+      setDashboardAPI(undefined);
+
+      const { scene: dashboardScene, scopesService } = await renderDashboard(
+        { uid: withUid ? 'dash-1' : undefined },
+        { reloadOnParamsChange }
+      );
+
+      dashboardReloadSpy = jest.spyOn(getDashboardScenePageStateManager(), 'reloadDashboard');
+
+      if (editMode) {
+        await enterEditMode(dashboardScene);
+      }
+
+      const shouldReload = reloadDashboardsOnParamsChange && reloadOnParamsChange && withUid && !editMode;
+      dashboardReloadSpy.mockClear();
+
+      await updateTimeRange(dashboardScene);
+      await jest.advanceTimersToNextTimerAsync();
+      if (!shouldReload) {
+        expect(dashboardReloadSpy).not.toHaveBeenCalled();
+      } else {
+        expect(dashboardReloadSpy).toHaveBeenCalled();
+      }
+
+      await updateMyVar(dashboardScene, '2');
+      await jest.advanceTimersToNextTimerAsync();
+      if (!shouldReload) {
+        expect(dashboardReloadSpy).not.toHaveBeenCalled();
+      } else {
+        expect(dashboardReloadSpy).toHaveBeenCalled();
+      }
+
+      await updateScopes(scopesService, ['grafana']);
+      await jest.advanceTimersToNextTimerAsync();
+      if (!shouldReload) {
+        expect(dashboardReloadSpy).not.toHaveBeenCalled();
+      } else {
+        expect(dashboardReloadSpy).toHaveBeenCalled();
+      }
+
+      getDashboardScenePageStateManager().clearDashboardCache();
+      getDashboardScenePageStateManager().clearSceneCache();
+      setDashboardAPI(undefined);
+      await resetScenes([dashboardReloadSpy]);
+    }
+  );
+});

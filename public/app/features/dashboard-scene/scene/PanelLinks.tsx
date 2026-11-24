@@ -1,0 +1,90 @@
+import { type DataLink, type LinkModel } from '@grafana/data';
+import { t } from '@grafana/i18n';
+import {
+  type SceneComponentProps,
+  sceneGraph,
+  SceneObjectBase,
+  type SceneObjectState,
+  VariableDependencyConfig,
+  VizPanel,
+} from '@grafana/scenes';
+import { Dropdown, Icon, Menu, PanelChrome } from '@grafana/ui';
+
+import { getPanelLinks } from './PanelMenuBehavior';
+import { usePanelActionsOverlayOpenChange } from './edit-actions-popover/PanelActionsOverlayContext';
+
+interface VizPanelLinksState extends SceneObjectState {
+  rawLinks?: DataLink[];
+  links?: LinkModel[];
+  menu: VizPanelLinksMenu;
+}
+
+export class VizPanelLinks extends SceneObjectBase<VizPanelLinksState> {
+  protected _variableDependency = new VariableDependencyConfig(this, {
+    onAnyVariableChanged: () => {
+      if (this.state.rawLinks && this.state.rawLinks.length > 0) {
+        this.forceRender();
+      }
+    },
+  });
+
+  static Component = VizPanelLinksRenderer;
+}
+
+function VizPanelLinksRenderer({ model }: SceneComponentProps<VizPanelLinks>) {
+  const { menu, rawLinks } = model.useState();
+  sceneGraph.getTimeRange(model).useState();
+  const onLinksMenuOpenChange = usePanelActionsOverlayOpenChange();
+
+  if (!(model.parent instanceof VizPanel)) {
+    throw new Error('VizPanelLinks must be a child of VizPanel');
+  }
+
+  if (!rawLinks || rawLinks.length === 0) {
+    return null;
+  }
+
+  if (rawLinks.length === 1) {
+    const link = getPanelLinks(model.parent)[0];
+    return (
+      <PanelChrome.TitleItem href={link.href} onClick={link.onClick} target={link.target} title={link.title}>
+        <Icon name="external-link-alt" size="md" />
+      </PanelChrome.TitleItem>
+    );
+  }
+
+  return (
+    <Dropdown
+      overlay={() => {
+        return <menu.Component model={menu} key={menu.state.key} />;
+      }}
+      onVisibleChange={onLinksMenuOpenChange}
+    >
+      <PanelChrome.TitleItem
+        aria-label={t('dashboard-scene.viz-panel-links-renderer.aria-label-panel-links', 'Panel links')}
+      >
+        <Icon name="external-link-alt" size="md" />
+      </PanelChrome.TitleItem>
+    </Dropdown>
+  );
+}
+
+export class VizPanelLinksMenu extends SceneObjectBase<Omit<VizPanelLinksState, 'menu' | 'rawLinks'>> {
+  static Component = VizPanelLinksMenuRenderer;
+}
+
+function VizPanelLinksMenuRenderer({ model }: SceneComponentProps<VizPanelLinks>) {
+  const { links } = model.useState();
+
+  if (!links) {
+    return null;
+  }
+
+  return (
+    <Menu>
+      {links?.map((link, idx) => {
+        return <Menu.Item key={idx} label={link.title} url={link.href} target={link.target} onClick={link.onClick} />;
+      })}
+    </Menu>
+  );
+}

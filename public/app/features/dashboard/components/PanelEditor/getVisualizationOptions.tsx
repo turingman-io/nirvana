@@ -1,0 +1,500 @@
+import { get as lodashGet } from 'lodash';
+
+import {
+  type EventBus,
+  type InterpolateFunction,
+  isNestedPanelOptions,
+  type NestedValueAccess,
+  type PanelData,
+  type PanelPlugin,
+  type PanelOptionsSupplier,
+  type StandardEditorContext,
+  type VariableSuggestionsScope,
+  type FieldConfigSource,
+  type FieldConfigPropertyItem,
+  PanelOptionsEditorBuilder,
+} from '@grafana/data';
+import { isVarMappingExpressionInput } from '@grafana/data/internal';
+import { t } from '@grafana/i18n';
+import { VizPanel } from '@grafana/scenes';
+import { Input } from '@grafana/ui';
+import { VarMappingNumberValueEditor } from 'app/core/components/OptionsUI/number';
+import { LibraryVizPanelInfo } from 'app/features/dashboard-scene/panel-edit/LibraryVizPanelInfo';
+import { type LibraryPanelBehavior } from 'app/features/dashboard-scene/scene/LibraryPanelBehavior';
+import { DashboardInteractions } from 'app/features/dashboard-scene/utils/interactions';
+import { getPanelIdForVizPanel } from 'app/features/dashboard-scene/utils/utils-panels';
+import { getDataLinksVariableSuggestions } from 'app/features/panel/panellinks/link_srv';
+
+import { OptionsPaneCategoryDescriptor } from './OptionsPaneCategoryDescriptor';
+import { OptionsPaneItemDescriptor } from './OptionsPaneItemDescriptor';
+import { getReportableOptionValue } from './getReportableOptionValue';
+import { getOptionOverrides, getVarMappingOptionOverrides } from './state/getOptionOverrides';
+import { type OptionPaneRenderProps } from './types';
+import {
+  getVarMappingEditingKind,
+  setOptionImmutably,
+  updateDefaultFieldConfigValue,
+  updateDefaultFieldConfigVarMapping,
+} from './utils';
+
+type categoryGetter = (categoryNames?: string[]) => OptionsPaneCategoryDescriptor;
+
+interface GetStandardEditorContextProps {
+  data: PanelData | undefined;
+  replaceVariables: InterpolateFunction;
+  options: Record<string, unknown>;
+  fieldConfig: FieldConfigSource;
+  eventBus: EventBus;
+  instanceState: OptionPaneRenderProps['instanceState'];
+}
+
+export function getStandardEditorContext({
+  data,
+  replaceVariables,
+  options,
+  fieldConfig,
+  eventBus,
+  instanceState,
+}: GetStandardEditorContextProps): StandardEditorContext<unknown, unknown> {
+  const dataSeries = data?.series ?? [];
+
+  const context: StandardEditorContext<unknown, unknown> = {
+    data: dataSeries,
+    replaceVariables,
+    options,
+    fieldConfig,
+    eventBus,
+    getSuggestions: (scope?: VariableSuggestionsScope) => getDataLinksVariableSuggestions(dataSeries, scope),
+    instanceState,
+    annotations: data?.annotations,
+  };
+
+  return context;
+}
+
+/**
+ * Whether a field config property should appear in the defaults pane.
+ *
+ * `data` is a separate argument for backward compatability, but is also contained in the context
+ *
+ * Overrides are not filtered here: `hideFromOverrides` is the knob for that side, so hiding a
+ * property from the defaults pane never hides an override rule that already configures it.
+ *
+ * @internal
+ */
+export function isFieldConfigOptionVisible(
+  fieldOption: FieldConfigPropertyItem,
+  data: PanelData | undefined,
+  context: StandardEditorContext<unknown, unknown>
+): boolean {
+  if (fieldOption.hideFromDefaults) {
+    return false;
+  }
+
+  if (!fieldOption.showIf) {
+    return true;
+  }
+
+  // A context built outside the options pane carries no field config
+  const defaults = context.fieldConfig?.defaults ?? {};
+  const currentValue = fieldOption.isCustom ? defaults.custom : defaults;
+
+  // showIf is typed `boolean | undefined` and an undefined return has always hidden the option.
+  return Boolean(fieldOption.showIf(currentValue, data?.series, data?.annotations, context));
+}
+
+/**
+ * How the defaults editor for a field config option reads its value and writes changes, including
+ * expressions kept in `defaults.varMappings`. The stored value stays as the fallback while an
+ * expression is shown.
+ */
+function getDefaultsEditing(
+  fieldOption: FieldConfigPropertyItem,
+  fieldConfig: FieldConfigSource,
+  varMappingsEnabled: boolean
+) {
+  const defaults = fieldConfig.defaults;
+  const storedValue = fieldOption.isCustom
+    ? defaults.custom
+      ? lodashGet(defaults.custom, fieldOption.path)
+      : undefined
+    : lodashGet(defaults, fieldOption.path);
+  const writeValue = (config: FieldConfigSource, v: unknown) =>
+    updateDefaultFieldConfigValue(config, fieldOption.path, v, fieldOption.isCustom);
+
+  const kind = varMappingsEnabled ? getVarMappingEditingKind(fieldOption) : undefined;
+
+  return {
+    // The unit picker already accepts custom text, so it can take an expression as is
+    Editor: kind === 'number' ? VarMappingNumberValueEditor : fieldOption.editor,
+    storedValue,
+    value: (kind ? defaults.varMappings?.[fieldOption.id] : undefined) ?? storedValue,
+    toFieldConfig: (v: unknown) => {
+      if (kind && isVarMappingExpressionInput(kind, v)) {
+        return updateDefaultFieldConfigVarMapping(fieldConfig, fieldOption.id, v);
+      }
+      // Writing a plain value also drops the expression, so the plain value takes effect. With the
+      // flag off this is the only way to get rid of an expression saved with the flag on.
+      return writeValue(updateDefaultFieldConfigVarMapping(fieldConfig, fieldOption.id, undefined), v);
+    },
+  };
+}
+
+export function getVisualizationOptions(props: OptionPaneRenderProps): OptionsPaneCategoryDescriptor[] {
+  const { plugin, panel, onPanelOptionsChanged, onFieldConfigsChange, data, dashboard, instanceState } = props;
+  const currentOptions = panel.getOptions();
+  const currentFieldConfig = panel.fieldConfig;
+  const categoryIndex: Record<string, OptionsPaneCategoryDescriptor> = {};
+
+  const context = getStandardEditorContext({
+    data,
+    replaceVariables: panel.replaceVariables,
+    options: currentOptions,
+    fieldConfig: currentFieldConfig,
+    eventBus: dashboard.events,
+    instanceState,
+  });
+
+  const getOptionsPaneCategory = (categoryNames?: string[]): OptionsPaneCategoryDescriptor => {
+    const categoryName = (categoryNames && categoryNames[0]) ?? `${plugin.meta.name}`;
+    const category = categoryIndex[categoryName];
+
+    if (category) {
+      return category;
+    }
+
+    return (categoryIndex[categoryName] = new OptionsPaneCategoryDescriptor({
+      title: categoryName,
+      id: categoryName,
+      sandboxId: plugin.meta.id,
+    }));
+  };
+
+  const access: NestedValueAccess = {
+    getValue: (path) => lodashGet(currentOptions, path),
+    onChange: (path, value) => {
+      const newOptions = setOptionImmutably(currentOptions, path, value);
+      onPanelOptionsChanged(newOptions);
+    },
+  };
+
+  // Load the options into categories
+  fillOptionsPaneItems('', plugin.getPanelOptionsSupplier(), access, getOptionsPaneCategory, context);
+
+  /**
+   * Field options
+   */
+  for (const fieldOption of plugin.fieldConfigRegistry.list()) {
+    if (!isFieldConfigOptionVisible(fieldOption, data, context)) {
+      continue;
+    }
+
+    const category = getOptionsPaneCategory(fieldOption.category);
+    const Editor = fieldOption.editor;
+
+    const defaults = currentFieldConfig.defaults;
+    const value = fieldOption.isCustom
+      ? defaults.custom
+        ? lodashGet(defaults.custom, fieldOption.path)
+        : undefined
+      : lodashGet(defaults, fieldOption.path);
+
+    if (fieldOption.getItemsCount) {
+      category.props.itemsCount = fieldOption.getItemsCount(value);
+    }
+
+    const htmlId = fieldOption.path;
+
+    category.addItem(
+      new OptionsPaneItemDescriptor({
+        title: fieldOption.name,
+        id: htmlId,
+        useFieldset: fieldOption.useFieldset,
+        description: fieldOption.description,
+        overrides: getOptionOverrides(fieldOption, currentFieldConfig, data?.series),
+        render: function renderEditor() {
+          const onChange = (v: unknown) => {
+            onFieldConfigsChange(
+              updateDefaultFieldConfigValue(currentFieldConfig, fieldOption.path, v, fieldOption.isCustom)
+            );
+          };
+
+          return <Editor value={value} onChange={onChange} item={fieldOption} context={context} id={htmlId} />;
+        },
+      })
+    );
+  }
+
+  return Object.values(categoryIndex);
+}
+
+export function getLibraryVizPanelOptionsCategory(libraryPanel: LibraryPanelBehavior): OptionsPaneCategoryDescriptor {
+  const descriptor = new OptionsPaneCategoryDescriptor({
+    title: t(
+      'dashboard.get-library-viz-panel-options-category.descriptor.title.library-panel-options',
+      'Library panel options'
+    ),
+    id: 'Library panel options',
+    isOpenDefault: true,
+  });
+
+  descriptor
+    .addItem(
+      new OptionsPaneItemDescriptor({
+        title: t('dashboard.get-library-viz-panel-options-category.title.name', 'Name'),
+        id: 'library-panel-name',
+        value: libraryPanel,
+        popularRank: 1,
+        render: function renderName(descriptor) {
+          return (
+            <Input
+              id={descriptor.props.id}
+              data-testid="library panel name input"
+              defaultValue={libraryPanel.state.name}
+              onBlur={(e) => {
+                const name = e.currentTarget.value;
+                const renamed = name !== libraryPanel.state.name;
+                libraryPanel.setState({ name });
+                const panel = libraryPanel.parent;
+                if (renamed && panel instanceof VizPanel) {
+                  DashboardInteractions.panelActionClicked(
+                    'rename_library_panel',
+                    getPanelIdForVizPanel(panel),
+                    'panel_editor',
+                    panel.state.pluginId
+                  );
+                }
+              }}
+            />
+          );
+        },
+      })
+    )
+    .addItem(
+      new OptionsPaneItemDescriptor({
+        title: t('dashboard.get-library-viz-panel-options-category.title.information', 'Information'),
+        id: 'library-panel-information',
+        render: function renderLibraryPanelInformation() {
+          return <LibraryVizPanelInfo libraryPanel={libraryPanel} />;
+        },
+      })
+    );
+
+  return descriptor;
+}
+
+export interface OptionPaneRenderProps2 {
+  panel: VizPanel;
+  eventBus: EventBus;
+  plugin: PanelPlugin;
+  data?: PanelData;
+  instanceState: unknown;
+  currentOptions: Record<string, unknown>;
+  currentFieldConfig: FieldConfigSource;
+  reportInteractionUI: 'panel-edit' | 'view-panel';
+  onOptionsChange?: (options: Record<string, unknown>, name: string, category: string) => void;
+  onFieldConfigChange?: (fieldConfig: FieldConfigSource, name: string, category: string) => void;
+  varMappingsEnabled?: boolean;
+}
+
+export function getVisualizationOptions2(props: OptionPaneRenderProps2): OptionsPaneCategoryDescriptor[] {
+  const {
+    plugin,
+    panel,
+    data,
+    eventBus,
+    instanceState,
+    currentOptions,
+    currentFieldConfig,
+    varMappingsEnabled = false,
+  } = props;
+
+  const categoryIndex: Record<string, OptionsPaneCategoryDescriptor> = {};
+  const getOptionsPaneCategory = (categoryNames?: string[]): OptionsPaneCategoryDescriptor => {
+    const categoryName = categoryNames?.[0] ?? plugin.meta.name;
+    const category = categoryIndex[categoryName];
+
+    if (category) {
+      return category;
+    }
+
+    return (categoryIndex[categoryName] = new OptionsPaneCategoryDescriptor({
+      title: categoryName,
+      id: categoryName,
+      sandboxId: plugin.meta.id,
+    }));
+  };
+
+  const access: NestedValueAccess = {
+    getValue: (path) => lodashGet(currentOptions, path),
+    onChange: (path, value) => {
+      const newOptions = setOptionImmutably(currentOptions, path, value);
+      // Merged rather than replaced, so an editor that drops a key from an object value keeps the old
+      // key — clearing requires setting it to undefined. Documented on StandardEditorProps.onChange.
+      // Switching to replace here would break editors that emit partial values for their own path.
+      const option = panelOptionItems.find((item) => item.path === path);
+      if (props.onOptionsChange) {
+        props.onOptionsChange(newOptions, option?.name ?? path, option?.category?.[0] ?? plugin.meta.name);
+      } else {
+        panel.onOptionsChange(newOptions);
+      }
+      // Record interaction for analytics
+      DashboardInteractions.setVisualOption({
+        ui: props.reportInteractionUI,
+        option: path,
+        ...getReportableOptionValue(value, option?.settings),
+        panel_type: plugin.meta.id,
+        panel_id: getPanelIdForVizPanel(panel),
+      });
+    },
+  };
+
+  const context = getStandardEditorContext({
+    data,
+    replaceVariables: panel.interpolate,
+    options: currentOptions,
+    fieldConfig: currentFieldConfig,
+    eventBus: eventBus,
+    instanceState,
+  });
+
+  // Load the options into categories
+  const panelOptionItems = fillOptionsPaneItems(
+    '',
+    plugin.getPanelOptionsSupplier(),
+    access,
+    getOptionsPaneCategory,
+    context
+  );
+
+  // Field options
+  for (const fieldOption of plugin.fieldConfigRegistry.list()) {
+    if (!isFieldConfigOptionVisible(fieldOption, data, context)) {
+      continue;
+    }
+
+    const category = getOptionsPaneCategory(fieldOption.category);
+    const { Editor, storedValue, value, toFieldConfig } = getDefaultsEditing(
+      fieldOption,
+      currentFieldConfig,
+      varMappingsEnabled
+    );
+
+    if (fieldOption.getItemsCount) {
+      category.props.itemsCount = fieldOption.getItemsCount(storedValue);
+    }
+
+    const htmlId = `${fieldOption.isCustom ? 'custom.' : ''}${fieldOption.path}`;
+
+    category.addItem(
+      new OptionsPaneItemDescriptor({
+        title: fieldOption.name,
+        id: htmlId,
+        useFieldset: fieldOption.useFieldset,
+        description: fieldOption.description,
+        overrides: [
+          ...getOptionOverrides(fieldOption, currentFieldConfig, data?.series),
+          ...(varMappingsEnabled ? getVarMappingOptionOverrides(fieldOption, currentFieldConfig) : []),
+        ],
+        render: function renderEditor() {
+          const onChange = (v: unknown) => {
+            const newFieldConfig = toFieldConfig(v);
+            if (props.onFieldConfigChange) {
+              props.onFieldConfigChange(newFieldConfig, fieldOption.name, category.props.title);
+            } else {
+              panel.onFieldConfigChange(newFieldConfig, true);
+            }
+
+            // Record interaction for analytics
+            DashboardInteractions.setVisualOption({
+              ui: props.reportInteractionUI,
+              option: `?${fieldOption.isCustom ? 'custom.' : ''}${fieldOption.path}`,
+              ...getReportableOptionValue(v, fieldOption.settings),
+              panel_type: plugin.meta.id,
+              panel_id: getPanelIdForVizPanel(panel),
+            });
+          };
+
+          return <Editor value={value} onChange={onChange} item={fieldOption} context={context} id={htmlId} />;
+        },
+      })
+    );
+  }
+
+  return Object.values(categoryIndex);
+}
+
+/**
+ * This will iterate all options panes and add register them with the configured categories
+ *
+ * @internal
+ */
+export function fillOptionsPaneItems(
+  idPrefix: string,
+  supplier: PanelOptionsSupplier<any>,
+  access: NestedValueAccess,
+  getOptionsPaneCategory: categoryGetter,
+  context: StandardEditorContext<unknown, unknown>,
+  parentCategory?: OptionsPaneCategoryDescriptor
+) {
+  const builder = new PanelOptionsEditorBuilder();
+  supplier(builder, context);
+
+  for (const pluginOption of builder.getItems()) {
+    if (pluginOption.showIf && !pluginOption.showIf(context.options, context.data, context.annotations, context)) {
+      continue;
+    }
+
+    const htmlId = `${idPrefix ? `${idPrefix}-` : ''}${pluginOption.id}`;
+
+    let category = parentCategory;
+    if (!category) {
+      category = getOptionsPaneCategory(pluginOption.category);
+    } else if (pluginOption.category?.[0]?.length) {
+      category = category.getCategory(pluginOption.category[0]);
+    }
+
+    // Nested options get passed up one level
+    if (isNestedPanelOptions(pluginOption)) {
+      const subAccess = pluginOption.getNestedValueAccess(access);
+      const subContext = subAccess.getContext
+        ? subAccess.getContext(context)
+        : { ...context, options: access.getValue(pluginOption.path) };
+
+      fillOptionsPaneItems(
+        htmlId,
+        pluginOption.getBuilder(),
+        subAccess,
+        getOptionsPaneCategory,
+        subContext,
+        category // parent category
+      );
+      continue;
+    }
+
+    const Editor = pluginOption.editor;
+    category.addItem(
+      new OptionsPaneItemDescriptor({
+        title: pluginOption.name,
+        id: htmlId,
+        description: pluginOption.description,
+        useFieldset: pluginOption.useFieldset,
+        render: function renderEditor() {
+          return (
+            <Editor
+              value={access.getValue(pluginOption.path)}
+              onChange={(value) => {
+                access.onChange(pluginOption.path, value);
+              }}
+              item={pluginOption}
+              context={context}
+              id={htmlId}
+            />
+          );
+        },
+      })
+    );
+  }
+
+  return builder.getItems();
+}

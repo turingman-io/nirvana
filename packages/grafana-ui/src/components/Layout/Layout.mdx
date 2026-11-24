@@ -1,0 +1,46 @@
+import { Canvas, ArgTypes } from '@storybook/addon-docs/blocks';
+import { Layout, HorizontalGroup, VerticalGroup } from '../Layout/Layout';
+import { Button } from '../Button/Button';
+import { Select } from '../Select/Select';
+import { ExampleFrame } from '../../utils/storybook/ExampleFrame';
+import * as LayoutStories from './Layout.story';
+
+# Layout
+
+> **Deprecated:** `Layout`, `HorizontalGroup` and `VerticalGroup` are deprecated in favor of `Stack`. Use `Stack`, or `Stack` with `direction="column"` in place of `VerticalGroup`.
+
+## When to use
+
+Don't use these components in new code. Existing code uses them for aligning items in a specified orientation, such as multiple elements that need to be arranged in rows or columns.
+
+## Never use for
+
+- **New layouts.** Use `Stack` instead.
+
+## Do's and don'ts
+
+No component-specific guidance documented yet.
+
+## Usage
+
+### Generic
+
+Expects multiple elements as `children` prop. This is the base for more specialized `Horizontal-` and `VerticalGroup` components.
+
+### Horizontal
+
+Used for horizontally aligning several elements (e.g. Button, Select) with a predefined spacing between them.
+
+<Canvas of={LayoutStories.Horizontal} />
+
+### Vertical
+
+Used for vertically aligning several elements (e.g. Button, Select) with a predefined spacing between them.
+
+<Canvas of={LayoutStories.Vertical} />
+
+## Accessibility
+
+## Props
+
+<ArgTypes of={Layout} />

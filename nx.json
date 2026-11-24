@@ -1,0 +1,46 @@
+{
+  "namedInputs": {
+    "default": ["{projectRoot}/**/*"],
+    "sharedPackageBuild": ["{workspaceRoot}/packages/*.config.parts.ts", "{workspaceRoot}/scripts/tsconfig.base.json"]
+  },
+  "targetDefaults": {
+    "build": {
+      "inputs": ["default", "sharedPackageBuild"],
+      "outputs": ["{projectRoot}/dist"],
+      "cache": true
+    },
+    "generate": {
+      "cache": true
+    }
+  },
+  "tui": {
+    "autoExit": true,
+    "enabled": false
+  },
+  "defaultBase": "main",
+  "analytics": false,
+  "release": {
+    "groups": {
+      "grafana": {
+        "projects": ["tag:release:grafana", "public/app/plugins/*/*"],
+        "projectsRelationship": "fixed"
+      }
+    },
+    "version": {
+      "versionActions": "scripts/release/version-actions.ts",
+      "versionPrefix": "",
+      "versionActionsOptions": {
+        "skipLockFileUpdate": true
+      },
+      "git": {
+        "commit": false,
+        "tag": false,
+        "stageChanges": false
+      }
+    },
+    "changelog": {
+      "workspaceChangelog": false,
+      "projectChangelogs": false
+    }
+  }
+}

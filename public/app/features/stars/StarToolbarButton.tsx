@@ -1,0 +1,84 @@
+import { useMemo } from 'react';
+
+import { selectors } from '@grafana/e2e-selectors';
+import { t } from '@grafana/i18n';
+import { Icon, ToolbarButton } from '@grafana/ui';
+
+import { itemStarred } from './analytics/main';
+import { useStarItem, useStarredItems } from './hooks';
+import { canUseStars } from './utils';
+
+const getStarTooltips = (title: string) => ({
+  star: t('stars.mark-as-starred', 'Mark as favorite'),
+  starWithTitle: t('stars.mark-as-starred-with-title', 'Mark "{{title}}" as favorite', { title }),
+  unstar: t('stars.unmark-as-starred', 'Unmark as favorite'),
+  unstarWithTitle: t('stars.unmark-as-starred-with-title', 'Unmark "{{title}}" as favorite', { title }),
+});
+
+type Props = {
+  title: string;
+  group: string;
+  kind: string;
+  id: string;
+};
+
+/** Renders nothing for a user without a stars resource, such as an anonymous user, since starring would fail. */
+export function StarToolbarButton(props: Props) {
+  if (!canUseStars()) {
+    return null;
+  }
+  return <StarToggle {...props} />;
+}
+
+function StarToggle({ title, group, kind, id }: Props) {
+  const tooltips = getStarTooltips(title);
+
+  const handleItemStar = useStarItem(group, kind);
+
+  const { data: stars, isLoading } = useStarredItems(group, kind);
+
+  const isStarred = useMemo(() => {
+    const starredItems = stars || [];
+
+    return starredItems.includes(id);
+  }, [id, stars]);
+
+  const handleStarToggle = async () => {
+    await handleItemStar(id, !isStarred);
+    itemStarred({
+      group,
+      kind,
+      status: !isStarred ? 'starred' : 'unstarred',
+      origin: 'StarToolbarButton',
+    });
+  };
+
+  const iconProps = useMemo(() => {
+    if (isLoading) {
+      return { name: 'spinner', type: 'default' } as const;
+    }
+    if (isStarred) {
+      return { name: 'favorite', type: 'mono' } as const;
+    }
+    return { name: 'star', type: 'default' } as const;
+  }, [isLoading, isStarred]);
+
+  const tooltipAndLabel = (() => {
+    return isStarred
+      ? { tooltip: tooltips.unstar, label: isLoading ? undefined : tooltips.unstarWithTitle }
+      : { tooltip: tooltips.star, label: isLoading ? undefined : tooltips.starWithTitle };
+  })();
+
+  const icon = <Icon key={`${isLoading}-${isStarred}`} {...iconProps} size="lg" />;
+  return (
+    <ToolbarButton
+      disabled={isLoading}
+      tooltip={tooltipAndLabel.tooltip}
+      aria-label={tooltipAndLabel.label}
+      aria-pressed={isStarred}
+      icon={icon}
+      data-testid={selectors.components.NavToolbar.markAsFavorite}
+      onClick={handleStarToggle}
+    />
+  );
+}

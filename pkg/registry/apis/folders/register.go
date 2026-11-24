@@ -1,0 +1,618 @@
+package folders
+
+import (
+	"context"
+	"fmt"
+	"slices"
+	"strings"
+	"sync"
+
+	"github.com/prometheus/client_golang/prometheus"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apiserver/pkg/admission"
+	"k8s.io/apiserver/pkg/authorization/authorizer"
+	genericregistry "k8s.io/apiserver/pkg/registry/generic/registry"
+	"k8s.io/apiserver/pkg/registry/rest"
+	genericapiserver "k8s.io/apiserver/pkg/server"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/kube-openapi/pkg/common"
+	"k8s.io/kube-openapi/pkg/spec3"
+
+	authlib "github.com/grafana/authlib/types"
+	"github.com/grafana/grafana-app-sdk/logging"
+	sdkres "github.com/grafana/grafana-app-sdk/resource"
+	dashv1 "github.com/grafana/grafana/apps/dashboard/pkg/apis/dashboard/v1"
+	dashV2beta1 "github.com/grafana/grafana/apps/dashboard/pkg/apis/dashboard/v2beta1"
+	foldersv1 "github.com/grafana/grafana/apps/folder/pkg/apis/folder/v1"
+	foldersv1alpha1 "github.com/grafana/grafana/apps/folder/pkg/apis/folder/v1alpha1"
+	foldersv1beta1 "github.com/grafana/grafana/apps/folder/pkg/apis/folder/v1beta1"
+	iamv0alpha1 "github.com/grafana/grafana/apps/iam/pkg/apis/iam/v0alpha1"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
+	"github.com/grafana/grafana/pkg/apimachinery/utils"
+	grafanaregistry "github.com/grafana/grafana/pkg/apiserver/registry/generic"
+	grafanarest "github.com/grafana/grafana/pkg/apiserver/rest"
+	"github.com/grafana/grafana/pkg/cmd/grafana-cli/logger"
+	iamapi "github.com/grafana/grafana/pkg/registry/apis/iam"
+	"github.com/grafana/grafana/pkg/registry/apis/iam/resourcepermission/rpclient"
+	"github.com/grafana/grafana/pkg/registry/fieldselectors"
+	"github.com/grafana/grafana/pkg/services/accesscontrol"
+	"github.com/grafana/grafana/pkg/services/accesscontrol/permissioncache"
+	"github.com/grafana/grafana/pkg/services/apiserver"
+	grafanaauthorizer "github.com/grafana/grafana/pkg/services/apiserver/auth/authorizer"
+	"github.com/grafana/grafana/pkg/services/apiserver/builder"
+	"github.com/grafana/grafana/pkg/services/authz/zanzana"
+	"github.com/grafana/grafana/pkg/services/featuremgmt"
+	"github.com/grafana/grafana/pkg/services/folder"
+	"github.com/grafana/grafana/pkg/services/sqlstore"
+	"github.com/grafana/grafana/pkg/setting"
+	"github.com/grafana/grafana/pkg/storage/unified/apistore"
+	"github.com/grafana/grafana/pkg/storage/unified/resource"
+	"github.com/grafana/grafana/pkg/storage/unified/resourcepb"
+)
+
+var (
+	_ builder.APIGroupBuilder    = (*FolderAPIBuilder)(nil)
+	_ builder.APIGroupValidation = (*FolderAPIBuilder)(nil)
+)
+
+// This is used just so wire has something unique to return
+type FolderAPIBuilder struct {
+	storage              grafanarest.Storage
+	permissionStore      PermissionStore
+	accessClient         authlib.AccessClient
+	parents              parentsGetter
+	searcher             resourcepb.ResourceIndexClient
+	maxNestedFolderDepth int
+	deleteChecks         *deleteCheckMetrics
+	countMetrics         *countMetrics
+
+	pendingDeletionResourceEnabled bool
+	// Nil when the resource is disabled; consumers requiring durable intent must fail closed.
+	pendingDeletionStore *genericregistry.Store
+
+	// Flags
+	useZanzana          bool // features.IsEnabledGlobally(featuremgmt.FlagZanzana)
+	permissionsOnCreate bool // cfg.RBAC.PermissionsOnCreation("folder")
+
+	// The legacy folder permission service is used while the RP API feature is off.
+	resourcePermissions  *rpclient.Client
+	folderPermissionsSvc accesscontrol.FolderPermissionsService // TODO: Remove this once kubernetesAuthzResourcePermissionApis is removed and the frontend is calling /apis directly to create root level folders
+	acService            accesscontrol.Service                  // refreshes the creator's permissions after the legacy default permissions are written
+
+	// Dashboard client for cascade delete, built lazily from cascadeConfigProvider; access via
+	// dashboardClient(ctx). Set independently of the authz flag so cleanup works whenever cascade is on.
+	cascadeConfigProvider apiserver.RestConfigProvider
+	dashboardSvc          *dynamic.NamespaceableResourceInterface
+	dashboardSvcMu        sync.Mutex
+	variableSvc           *dynamic.NamespaceableResourceInterface
+	variableSvcMu         sync.Mutex
+	// contentsDeleter removes alert rules and library elements contained in a folder during cascade
+	// delete. Always set by RegisterAPIService (embedded); set by NewAPIService (standalone) only
+	// when the deployment opts into that cleanup.
+	contentsDeleter FolderContentsDeleter
+}
+
+// dashboardClient builds the dashboard dynamic client lazily. Returns nil when no config provider is
+// set, in which case cascade delete skips dashboard cleanup.
+func (b *FolderAPIBuilder) dashboardClient(ctx context.Context) (*dynamic.NamespaceableResourceInterface, error) {
+	if b.cascadeConfigProvider == nil {
+		return b.dashboardSvc, nil
+	}
+
+	b.dashboardSvcMu.Lock()
+	defer b.dashboardSvcMu.Unlock()
+
+	if b.dashboardSvc != nil {
+		return b.dashboardSvc, nil
+	}
+
+	cfg, err := b.cascadeConfigProvider.GetRestConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get rest config: %w", err)
+	}
+	dyn, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("create dynamic client: %w", err)
+	}
+	client := dyn.Resource(dashv1.DashboardResourceInfo.GroupVersionResource())
+	b.dashboardSvc = &client
+	return b.dashboardSvc, nil
+}
+
+func (b *FolderAPIBuilder) variableClient(ctx context.Context) (*dynamic.NamespaceableResourceInterface, error) {
+	if b.cascadeConfigProvider == nil {
+		return b.variableSvc, nil
+	}
+
+	b.variableSvcMu.Lock()
+	defer b.variableSvcMu.Unlock()
+
+	if b.variableSvc != nil {
+		return b.variableSvc, nil
+	}
+
+	cfg, err := b.cascadeConfigProvider.GetRestConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get rest config: %w", err)
+	}
+	dyn, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("create dynamic client: %w", err)
+	}
+	client := dyn.Resource(dashV2beta1.VariableResourceInfo.GroupVersionResource())
+	b.variableSvc = &client
+	return b.variableSvc, nil
+}
+
+func RegisterAPIService(cfg *setting.Cfg,
+	features featuremgmt.FeatureToggles,
+	iamFeatures iamapi.Features,
+	apiregistration builder.APIRegistrar,
+	folderPermissionsSvc accesscontrol.FolderPermissionsService,
+	acService accesscontrol.Service,
+	sqlStore *sqlstore.SQLStore,
+	accessClient authlib.AccessClient,
+	registerer prometheus.Registerer,
+	unified resource.ResourceClient,
+	zanzanaClient zanzana.Client,
+	restConfigProvider apiserver.RestConfigProvider,
+	contentsDeleter FolderContentsDeleter,
+) *FolderAPIBuilder {
+	builder := &FolderAPIBuilder{
+		pendingDeletionResourceEnabled: cfg.PendingDeletionResourceEnabled,
+		accessClient:                   accessClient,
+		permissionsOnCreate:            cfg.RBAC.PermissionsOnCreation("folder"),
+		useZanzana:                     features.IsEnabledGlobally(featuremgmt.FlagZanzana), //nolint:staticcheck
+		searcher:                       unified,
+		permissionStore:                NewZanzanaPermissionStore(zanzanaClient),
+		maxNestedFolderDepth:           cfg.MaxNestedFolderDepth,
+		contentsDeleter:                contentsDeleter,
+		deleteChecks:                   newDeleteCheckMetrics(registerer, true), // the monolith always joins legacy storage
+		countMetrics:                   newCountMetrics(registerer, true),
+	}
+
+	// With the flag on, use the App Platform permission path and leave the legacy folderPermissionsSvc
+	// unwired (so its folderStorage wrapper isn't installed); otherwise keep the legacy path.
+	if iamFeatures.ResourcePermissionsAPI {
+		if restConfigProvider != nil {
+			builder.resourcePermissions = rpclient.New(rpclient.FromRestConfig(restConfigProvider), foldersv1.FolderResourceInfo.GroupVersionResource().GroupResource())
+		}
+	} else {
+		builder.folderPermissionsSvc = folderPermissionsSvc
+		builder.acService = acService
+		sqlStore.Bus().AddEventListener(builder.onDefaultPermissionsSet)
+	}
+
+	// Cascade dashboard cleanup needs an apiserver client regardless of the authz flag above.
+	builder.cascadeConfigProvider = restConfigProvider
+
+	apiregistration.RegisterAPI(builder)
+	return builder
+}
+
+func NewAPIService(ac authlib.AccessClient, searcher resource.ResourceClient, features featuremgmt.FeatureToggles, zanzanaClient zanzana.Client, resourcePermissions *rpclient.Client, dashboardSvc *dynamic.NamespaceableResourceInterface, variableSvc *dynamic.NamespaceableResourceInterface, maxNestedFolderDepth int, contentsDeleter FolderContentsDeleter, opts ...APIServiceOption) *FolderAPIBuilder {
+	b := &FolderAPIBuilder{
+		accessClient:         ac,
+		searcher:             searcher,
+		permissionStore:      NewZanzanaPermissionStore(zanzanaClient),
+		dashboardSvc:         dashboardSvc, // injected so cascade delete can remove dashboards in MT
+		variableSvc:          variableSvc,  // injected so cascade delete can remove variables in MT
+		maxNestedFolderDepth: maxNestedFolderDepth,
+		contentsDeleter:      contentsDeleter,                                     // injected so cascade delete can remove alert rules and library panels in standalone mode
+		useZanzana:           features.IsEnabledGlobally(featuremgmt.FlagZanzana), //nolint:staticcheck
+		resourcePermissions:  resourcePermissions,
+	}
+	for _, opt := range opts {
+		opt(b)
+	}
+	return b
+}
+
+// APIServiceOption configures NewAPIService.
+type APIServiceOption func(*FolderAPIBuilder)
+
+// WithDeleteCheckMetrics exports the delete-check counter on reg.
+func WithDeleteCheckMetrics(reg prometheus.Registerer, legacyJoinEnabled bool) APIServiceOption {
+	return func(b *FolderAPIBuilder) { b.deleteChecks = newDeleteCheckMetrics(reg, legacyJoinEnabled) }
+}
+
+// WithCountMetrics exports the folder count counter on reg.
+func WithCountMetrics(reg prometheus.Registerer, legacyJoinEnabled bool) APIServiceOption {
+	return func(b *FolderAPIBuilder) { b.countMetrics = newCountMetrics(reg, legacyJoinEnabled) }
+}
+
+// WithPendingDeletionResourceEnabled sets the process-startup resource gate in standalone deployments.
+func WithPendingDeletionResourceEnabled(enabled bool) APIServiceOption {
+	return func(b *FolderAPIBuilder) { b.pendingDeletionResourceEnabled = enabled }
+}
+
+func (b *FolderAPIBuilder) GetGroupVersions() []schema.GroupVersion {
+	// Same pattern as dashboards: stable version first, then compatibility alias.
+	// This order feeds LegacyCodec(groupVersions...) and must match SetVersionPriority below.
+	versions := []schema.GroupVersion{
+		foldersv1.FolderResourceInfo.GroupVersion(),
+		foldersv1beta1.FolderResourceInfo.GroupVersion(),
+	}
+	if b.pendingDeletionResourceEnabled {
+		versions = append(versions, foldersv1alpha1.PendingFolderDeletionResourceInfo.GroupVersion())
+	}
+	return versions
+}
+
+func addKnownTypes(scheme *runtime.Scheme, gv schema.GroupVersion, types ...runtime.Object) {
+	scheme.AddKnownTypes(gv, types...)
+}
+
+func (b *FolderAPIBuilder) InstallSchema(scheme *runtime.Scheme) error {
+	gvv1beta1 := foldersv1beta1.FolderResourceInfo.GroupVersion()
+	gvv1 := foldersv1.FolderResourceInfo.GroupVersion()
+
+	gvalpha := foldersv1alpha1.PendingFolderDeletionResourceInfo.GroupVersion()
+	addKnownTypes(scheme, gvalpha, &foldersv1alpha1.PendingFolderDeletion{}, &foldersv1alpha1.PendingFolderDeletionList{})
+	metav1.AddToGroupVersion(scheme, gvalpha)
+
+	addKnownTypes(scheme, gvv1,
+		&foldersv1.Folder{},
+		&foldersv1.FolderList{},
+		&foldersv1.FolderInfoList{},
+		&foldersv1.DescendantCounts{},
+		&foldersv1.FolderAccessInfo{},
+	)
+
+	addKnownTypes(scheme, gvv1beta1,
+		&foldersv1beta1.Folder{},
+		&foldersv1beta1.FolderList{},
+		&foldersv1beta1.FolderInfoList{},
+		&foldersv1beta1.DescendantCounts{},
+		&foldersv1beta1.FolderAccessInfo{},
+	)
+	// Link v1beta1 to the internal representation.
+	// This is used for server-side-apply (PATCH), and avoids the error:
+	//   "no kind is registered for the type"
+	addKnownTypes(scheme, schema.GroupVersion{
+		Group:   foldersv1.FolderResourceInfo.GroupVersion().Group,
+		Version: runtime.APIVersionInternal,
+	},
+		&foldersv1alpha1.PendingFolderDeletion{},
+		&foldersv1alpha1.PendingFolderDeletionList{},
+		&foldersv1.Folder{},
+		&foldersv1.FolderList{},
+		&foldersv1.FolderInfoList{},
+		&foldersv1.DescendantCounts{},
+		&foldersv1.FolderAccessInfo{},
+	)
+
+	metav1.AddToGroupVersion(scheme, gvv1)
+	metav1.AddToGroupVersion(scheme, gvv1beta1)
+	err := fieldselectors.AddSelectableFieldLabelConversions(scheme, gvv1, foldersv1.FolderKind())
+	if err != nil {
+		return err
+	}
+	err = fieldselectors.AddSelectableFieldLabelConversions(scheme, gvv1beta1, foldersv1beta1.FolderKind())
+	if err != nil {
+		return err
+	}
+	return scheme.SetVersionPriority(b.GetGroupVersions()...)
+}
+
+func (b *FolderAPIBuilder) AllowedV0Alpha1Resources() []string {
+	return nil
+}
+
+func (b *FolderAPIBuilder) storageForVersion(
+	apiGroupInfo *genericapiserver.APIGroupInfo,
+	opts builder.APIGroupOptions,
+	folders utils.ResourceInfo,
+	folderKind sdkres.Kind,
+) error {
+	selectableFieldsOpts := grafanaregistry.SelectableFieldsOptions{
+		GetAttrs: fieldselectors.BuildGetAttrsFn(folderKind),
+	}
+	// Scoped to this version, so the GVK it persists under is the one being
+	// installed rather than whichever registration the scheme reports first
+	// (v1 and v1beta1 share one Go type).
+	optsGetter := opts.StorageOptsGetterFor(folders, b.folderStorageOpts())
+	unified, err := grafanaregistry.NewRegistryStoreWithSelectableFields(opts.Scheme, folders, optsGetter, selectableFieldsOpts)
+	if err != nil {
+		return err
+	}
+	b.registerPermissionHooks(unified)
+	b.storage = unified
+
+	// This is the ST wrapper
+	if b.folderPermissionsSvc != nil {
+		b.storage = &folderStorage{
+			resourceInfo:         folders,
+			tableConverter:       folders.TableConverter(),
+			folderPermissionsSvc: b.folderPermissionsSvc,
+			refreshCreator:       b.refreshCreatorAfterCommit,
+			permissionsOnCreate:  b.permissionsOnCreate,
+			store:                unified,
+		}
+	}
+
+	var pendingStore grafanarest.Storage
+	if b.pendingDeletionStore != nil {
+		pendingStore = b.pendingDeletionStore
+	}
+	// The inner writer intercepts each descendant delete performed by the cascade.
+	b.storage = newPendingDeleteStorage(b.storage, pendingStore, folderPendingDeletionWritesEnabled, b.accessClient)
+
+	// Cascade delete wrapper -- always wired (both ST and MT). Recursively deletes a folder's
+	// subtree on delete; a no-op delegate unless kubernetesFolderCascadeDelete is enabled.
+	b.storage = newCascadeDeleteStorage(b.storage, b.searcher, b.dashboardClient, b.variableClient, b.contentsDeleter, b.accessClient)
+
+	storage := map[string]rest.Storage{}
+	storage[folders.StoragePath()] = b.storage
+	// Status writes go straight to the unified store: the ST and cascade wrappers only override
+	// Create/Delete, and the status strategy keeps spec and metadata intact.
+	storage[folders.StoragePath("status")] = grafanaregistry.NewStatusREST(unified, newFolderStatusStrategy(opts.Scheme, folders.GroupVersion()))
+
+	b.parents = newParentsGetter(b.storage) // used for validation
+	storage[folders.StoragePath("parents")] = &subParentsREST{
+		getter:  b.storage,
+		parents: b.parents,
+	}
+	storage[folders.StoragePath("counts")] = &subCountREST{
+		getter:   b.storage,
+		searcher: b.countMetrics.wrap(b.searcher, countCallerEndpoint),
+	}
+	storage[folders.StoragePath("access")] = &subAccessREST{
+		getter:       b.storage,
+		accessClient: b.accessClient,
+	}
+
+	// Adds a path to return children of a given folder
+	storage[folders.StoragePath("children")] = &subChildrenREST{
+		getter:   b.storage,
+		searcher: b.searcher,
+	}
+
+	apiGroupInfo.VersionedResourcesStorageMap[folders.GroupVersion().Version] = storage
+	return nil
+}
+
+// folderStorageOpts are the unified storage options every folder version shares.
+// storageForVersion pairs them with the GVK of the version it installs, which is
+// what preserves the client's apiVersion/kind on write: without it apistore.encode
+// falls back to the global LegacyCodec and converts to a single preferred version.
+func (b *FolderAPIBuilder) folderStorageOpts() apistore.StorageOptions {
+	return apistore.StorageOptions{
+		Index:                b.searcher,
+		EnableFolderSupport:  true,
+		DeprecatedInternalID: apistore.DeprecatedID_Required,
+		Permissions:          b.setDefaultFolderPermissions,
+	}
+}
+
+func (b *FolderAPIBuilder) UpdateAPIGroupInfo(apiGroupInfo *genericapiserver.APIGroupInfo, opts builder.APIGroupOptions) error {
+	if b.pendingDeletionResourceEnabled {
+		pending := foldersv1alpha1.PendingFolderDeletionResourceInfo
+		store, err := grafanaregistry.NewRegistryStore(opts.Scheme, pending, opts.StorageOptsGetterFor(pending, apistore.StorageOptions{}))
+		if err != nil {
+			return err
+		}
+		b.pendingDeletionStore = store
+		apiGroupInfo.VersionedResourcesStorageMap[pending.GroupVersion().Version] = map[string]rest.Storage{pending.StoragePath(): store}
+	}
+	// v1
+	if err := b.storageForVersion(
+		apiGroupInfo,
+		opts,
+		foldersv1.FolderResourceInfo,
+		foldersv1.FolderKind(),
+	); err != nil {
+		return err
+	}
+
+	// v1beta1
+	if err := b.storageForVersion(
+		apiGroupInfo,
+		opts,
+		foldersv1beta1.FolderResourceInfo,
+		foldersv1beta1.FolderKind(),
+	); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+var defaultPermissions = []iamv0alpha1.ResourcePermissionspecPermission{
+	{Kind: iamv0alpha1.ResourcePermissionSpecPermissionKindBasicRole, Name: "Editor", Verb: "edit"},
+	{Kind: iamv0alpha1.ResourcePermissionSpecPermissionKindBasicRole, Name: "Viewer", Verb: "view"},
+}
+
+// buildDefaultFolderPermissions returns the default folder permissions with the creator granted
+// admin (in addition to the default basic-role permissions). Non-user/service-account identities
+// (anonymous, render service, etc.) get only the default permission set.
+func buildDefaultFolderPermissions(id authlib.AuthInfo) []iamv0alpha1.ResourcePermissionspecPermission {
+	var creatorKind string
+	switch id.GetIdentityType() {
+	case authlib.TypeUser:
+		creatorKind = string(iamv0alpha1.ResourcePermissionSpecPermissionKindUser)
+	case authlib.TypeServiceAccount:
+		creatorKind = string(iamv0alpha1.ResourcePermissionSpecPermissionKindServiceAccount)
+	default:
+		// Non-user/service-account identities (anonymous, render service, etc.) get only the
+		// default permission set; no creator admin grant.
+	}
+
+	if creatorKind == "" {
+		return defaultPermissions
+	}
+
+	permissions := make([]iamv0alpha1.ResourcePermissionspecPermission, 0, len(defaultPermissions)+1)
+	permissions = append(permissions, iamv0alpha1.ResourcePermissionspecPermission{
+		Kind: iamv0alpha1.ResourcePermissionSpecPermissionKind(creatorKind),
+		Name: id.GetIdentifier(),
+		Verb: "admin",
+	})
+	return append(permissions, defaultPermissions...)
+}
+
+type folderDefaultPermissionsSet struct {
+	requester identity.Requester
+}
+
+// refreshCreatorAfterCommit reloads the creator's permissions after the outermost SQL
+// transaction on ctx commits, or immediately when ctx carries no transaction.
+func (b *FolderAPIBuilder) refreshCreatorAfterCommit(ctx context.Context, requester identity.Requester) {
+	if b.acService == nil || requester == nil || !requester.IsIdentityType(authlib.TypeUser, authlib.TypeServiceAccount) {
+		return
+	}
+	event := &folderDefaultPermissionsSet{requester: requester}
+	if sess := sqlstore.SessionFromContext(ctx); sess != nil {
+		sess.PublishAfterCommit(event)
+		return
+	}
+	_ = b.onDefaultPermissionsSet(ctx, event)
+}
+
+func (b *FolderAPIBuilder) onDefaultPermissionsSet(ctx context.Context, event *folderDefaultPermissionsSet) error {
+	permissioncache.RefreshCreator(ctx, b.acService, event.requester)
+	return nil
+}
+
+func (b *FolderAPIBuilder) setDefaultFolderPermissions(ctx context.Context, key *resourcepb.ResourceKey, id authlib.AuthInfo, obj utils.GrafanaMetaAccessor) error {
+	if b.resourcePermissions == nil {
+		return nil
+	}
+
+	// only set default permissions for root folders
+	if !folder.IsRootFolderUID(obj.GetFolder()) {
+		return nil
+	}
+
+	log := logging.FromContext(ctx)
+	log.Debug("setting default folder permissions", "uid", obj.GetName(), "namespace", obj.GetNamespace())
+
+	permissions := buildDefaultFolderPermissions(id)
+	err := b.resourcePermissions.SetDefault(ctx, obj.GetNamespace(), obj.GetName(), permissions)
+	if err != nil {
+		logger.Error("failed to set root permissions", "error", err)
+		return fmt.Errorf("set root permissions: %w", err)
+	}
+
+	return nil
+}
+
+func (b *FolderAPIBuilder) registerPermissionHooks(store *genericregistry.Store) {
+	log := logging.FromContext(context.Background())
+	if b.useZanzana {
+		log.Info("Enabling Zanzana folder propagation hooks")
+		store.BeginCreate = b.beginCreate
+		store.BeginUpdate = b.beginUpdate
+	} else {
+		log.Info("Zanzana is not enabled; skipping folder propagation hooks")
+	}
+
+	store.AfterDelete = b.afterDelete
+}
+
+func (b *FolderAPIBuilder) GetOpenAPIDefinitions() common.GetOpenAPIDefinitions {
+	// Folder v1beta1 aliases v1; only the pending resource has separate alpha definitions.
+	return func(ref common.ReferenceCallback) map[string]common.OpenAPIDefinition {
+		definitions := foldersv1.GetOpenAPIDefinitions(ref)
+		for name, definition := range foldersv1alpha1.GetOpenAPIDefinitions(ref) {
+			definitions[name] = definition
+		}
+		return definitions
+	}
+}
+
+func (b *FolderAPIBuilder) PostProcessOpenAPI(oas *spec3.OpenAPI) (*spec3.OpenAPI, error) {
+	oas.Info.Description = "Grafana folders"
+
+	// status is server-written; clients creating or replacing a folder never send it.
+	if oas.Components != nil {
+		if s, ok := oas.Components.Schemas[foldersv1.OpenAPIPrefix+"Folder"]; ok && s != nil {
+			// Copy first: v1 and v1beta1 share the generated definitions, so editing in place
+			// would corrupt the other version's required list.
+			s.Required = slices.DeleteFunc(slices.Clone(s.Required), func(f string) bool { return f == "status" })
+		}
+	}
+	return oas, nil
+}
+
+// The default authorizer is fine because authorization happens in storage where we know the parent folder
+func (b *FolderAPIBuilder) GetAuthorizer() authorizer.Authorizer {
+	return pendingDeletionAuthorizer(grafanaauthorizer.NewServiceAuthorizer())
+}
+
+func (b *FolderAPIBuilder) Mutate(ctx context.Context, a admission.Attributes, _ admission.ObjectInterfaces) error {
+	if a.GetResource().GroupResource() == foldersv1alpha1.PendingFolderDeletionResourceInfo.GroupResource() {
+		return nil
+	}
+	verb := a.GetOperation()
+	if verb == admission.Create || verb == admission.Update {
+		obj := a.GetObject()
+		f, ok := obj.(*foldersv1.Folder)
+		if !ok {
+			return fmt.Errorf("obj is not folders.Folder")
+		}
+		f.Spec.Title = strings.Trim(f.Spec.Title, " ")
+		if verb == admission.Create {
+			applyCascadeDeleteFinalizerOnCreate(f, folderAsyncCascadeDeleteEnabled(ctx))
+			return nil
+		}
+		old, ok := a.GetOldObject().(*foldersv1.Folder)
+		if !ok {
+			return fmt.Errorf("old obj is not folders.Folder")
+		}
+		preserveCascadeDeleteFinalizerOnUpdate(f, old)
+		return nil
+	}
+	return nil
+}
+
+func (b *FolderAPIBuilder) Validate(ctx context.Context, a admission.Attributes, _ admission.ObjectInterfaces) error {
+	if a.GetResource().GroupResource() == foldersv1alpha1.PendingFolderDeletionResourceInfo.GroupResource() {
+		return validatePendingDeletion(a)
+	}
+	var obj runtime.Object
+	verb := a.GetOperation()
+
+	switch verb {
+	case admission.Create, admission.Update:
+		obj = a.GetObject()
+	case admission.Delete:
+		obj = a.GetOldObject()
+		if obj == nil {
+			return fmt.Errorf("old object is nil for delete request")
+		}
+	case admission.Connect:
+		return nil
+	default:
+		obj = a.GetObject()
+	}
+
+	f, ok := obj.(*foldersv1.Folder)
+	if !ok {
+		return fmt.Errorf("obj is not folders.Folder")
+	}
+
+	switch a.GetOperation() {
+	case admission.Create:
+		if err := validateOwnerReferencesOnManagedFolder(f, nil); err != nil {
+			return err
+		}
+		return validateOnCreate(ctx, f, newCreateParentsGetter(b.storage), b.maxNestedFolderDepth, a.IsDryRun())
+	case admission.Delete:
+		deleteOptions, _ := a.GetOperationOptions().(*metav1.DeleteOptions)
+		return validateOnDelete(ctx, f, b.countMetrics.wrap(b.searcher, countCallerDeleteCheck), deleteOptions, kubernetesFolderCascadeDeleteEnabled(ctx), b.deleteChecks.withDryRun(a.IsDryRun()))
+	case admission.Update:
+		old, ok := a.GetOldObject().(*foldersv1.Folder)
+		if !ok {
+			return fmt.Errorf("obj is not folders.Folder")
+		}
+		if err := validateOwnerReferencesOnManagedFolder(f, old); err != nil {
+			return err
+		}
+		return validateOnUpdate(ctx, f, old, b.storage, b.parents, b.searcher, b.accessClient, b.maxNestedFolderDepth)
+	default:
+		return nil
+	}
+}
