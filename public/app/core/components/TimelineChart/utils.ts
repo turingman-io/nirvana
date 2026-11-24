@@ -334,21 +334,6 @@ function mergeThresholdValues(field: Field, theme: GrafanaTheme2): Field | undef
   };
 }
 
-export const ZERO_DURATION_END_OFFSET = 0.5;
-
-function ensureEndAfterStart(startField: Field, endField: Field): Field {
-  return {
-    ...endField,
-    values: endField.values.map((end, i) => {
-      const start = startField.values[i];
-      if (end == null || start == null || end > start) {
-        return end;
-      }
-      return start + ZERO_DURATION_END_OFFSET;
-    }),
-  };
-}
-
 // This will return a set of frames with only graphable values included
 export function prepareTimelineFields(
   series: DataFrame[] | undefined,
@@ -397,7 +382,7 @@ export function prepareTimelineFields(
 
       let endFrame: DataFrame = {
         length: frame.length,
-        fields: [ensureEndAfterStart(frame.fields[startFieldIdx], frame.fields[endFieldIdx])],
+        fields: [frame.fields[endFieldIdx]],
       };
 
       frame = outerJoinDataFrames({
