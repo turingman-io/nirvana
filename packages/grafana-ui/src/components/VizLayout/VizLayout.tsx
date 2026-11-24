@@ -88,10 +88,7 @@ export const VizLayout: VizLayoutComponentType = ({ width, height, legend, child
 
       if (legend.props.width != null) {
         legendStyle.width = legend.props.width;
-
-        if (!legendMeasure.width) {
-          size = { width: width - legend.props.width, height };
-        }
+        size = { width: width - legend.props.width, height };
       }
       break;
   }
