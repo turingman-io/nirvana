@@ -13,7 +13,7 @@ const regexValueMatcher: ValueMatcherInfo<BasicValueMatcherOptions<string>> = {
 
     return (valueIndex: number, field: Field) => {
       const value = field.values[valueIndex];
-      return value != null && regex.test(value);
+      return regex.test(value);
     };
   },
   getOptionsDisplayText: (options) => {
