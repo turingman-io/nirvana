@@ -53,7 +53,7 @@ export function SaveDashboardAsForm({ dashboard, changeInfo, drawer, isHeld }: P
         uid: dashboard.state.meta.folderUid,
         title: dashboard.state.meta.folderTitle,
       },
-      copyTags: changeInfo.isNew,
+      copyTags: false,
     },
   });
 
