@@ -117,9 +117,8 @@ export const TableContainer = memo(function TableContainer({
   let dataLimited = false;
 
   if (dataFrames?.length) {
-    dataFrames = dataFrames.map((frame) => ({
-      ...frame,
-      fields: frame.fields.map((field, index) => {
+    dataFrames = dataFrames.map((frame) => {
+      frame.fields.forEach((field, index) => {
         const custom = field.config.custom ?? {};
 
         const hiddenByColumnLimit = showAll ? false : index >= MAX_NUMBER_OF_COLUMNS;
@@ -128,22 +127,17 @@ export const TableContainer = memo(function TableContainer({
         const hiddenByDatasource = custom.hideFrom?.viz === true || custom.hidden === true;
         const hidden = hiddenByDatasource || hiddenByColumnLimit;
 
-        return {
-          ...field,
-          config: {
-            ...field.config,
-            custom: {
-              ...custom,
-              hidden,
-              hideFrom: {
-                ...custom.hideFrom,
-                viz: hidden,
-              },
-            },
+        field.config.custom = {
+          ...custom,
+          hidden,
+          hideFrom: {
+            ...custom.hideFrom,
+            viz: hidden,
           },
         };
-      }),
-    }));
+      });
+      return frame;
+    });
 
     dataFrames = applyFieldOverrides({
       data: dataFrames,
@@ -190,7 +184,6 @@ export const TableContainer = memo(function TableContainer({
               titleItems={[
                 !showAll && dataLimited && (
                   <LimitedDataDisclaimer
-                    key="disclaimer"
                     toggleShowAllSeries={() => setShowAll(true)}
                     info={
                       <Trans i18nKey={'table.container.show-only-series'}>
