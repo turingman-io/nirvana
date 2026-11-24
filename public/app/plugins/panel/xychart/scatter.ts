@@ -485,18 +485,14 @@ export const prepConfig = (xySeries: XYSeries[], theme: GrafanaTheme2) => {
           let maxVal = sizeRange.max;
           let valRange = maxVal - minVal;
 
-          if (valRange === 0) {
-            diams = Array(len).fill(s.y.field.config.custom.pointSize.fixed);
-          } else {
-            diams = Array(len);
+          diams = Array(len);
 
-            for (let i = 0; i < vals.length; i++) {
-              let val = vals[i];
+          for (let i = 0; i < vals.length; i++) {
+            let val = vals[i];
 
-              let valPct = (val - minVal) / valRange;
-              let pxArea = minPx + valPct * pxRange;
-              diams[i] = pxArea ** 0.5;
-            }
+            let valPct = (val - minVal) / valRange;
+            let pxArea = minPx + valPct * pxRange;
+            diams[i] = pxArea ** 0.5;
           }
         } else {
           diams = Array(len).fill(s.size.fixed!);
