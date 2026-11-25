@@ -13,13 +13,11 @@ import {
   FieldColorModeId,
   type DecimalCount,
 } from '@grafana/data';
-// eslint-disable-next-line import/order
 import {
   AxisPlacement,
   GraphDrawStyle,
   type GraphFieldConfig,
   GraphThresholdsStyleMode,
-  type LineStyle,
   VisibilityMode,
   ScaleDirection,
   ScaleOrientation,
@@ -30,33 +28,23 @@ import {
   VizOrientation,
   type ScaleDistributionConfig,
 } from '@grafana/schema';
+import {
+  UPlotConfigBuilder,
+  type UPlotConfigPrepFn,
+  getScaleGradientFn,
+  buildScaleKey,
+  getStackingGroups,
+  preparePlotData2,
+  type AxisProps,
+} from '@grafana/ui/internal';
 
-/**
- * Distinct line styles cycled per series when the "accessible" line style is selected.
- * 9 patterns to maximize distinguishable series before repeats.
- */
-const ALTERNATING_PATTERN_LINE_STYLES: LineStyle[] = [
-  { fill: 'solid' },
-  { fill: 'dash', dash: [10, 10] },
-  { fill: 'dash', dash: [20, 10] },
-  { fill: 'dash', dash: [30, 3, 3] },
-  { fill: 'dash', dash: [10, 5, 3, 5] },
-  { fill: 'dash', dash: [5, 5] },
-  { fill: 'dash', dash: [20, 5, 5, 5] },
-  { fill: 'dash', dash: [15, 10, 5, 10] },
-  { fill: 'dash', dash: [30, 10] },
-];
+import { ANNOTATION_LANE_SIZE } from '../../../plugins/panel/timeseries/plugins/utils';
 
-/**
- * Resolves the "accessible" (alternating patterns) fill type into a concrete line style per series.
- * Non accessible line styles pass through unchanged.
- */
-function resolveLineStyle(lineStyle: LineStyle | undefined, seriesIndex: number): LineStyle | undefined {
-  if (!lineStyle || lineStyle.fill !== 'accessible') {
-    return lineStyle;
-  }
-  return ALTERNATING_PATTERN_LINE_STYLES[seriesIndex % ALTERNATING_PATTERN_LINE_STYLES.length];
-}
+import { getCursorConfig } from './cursor';
+import { resolveLineStyle } from './lineStyles';
+import { isolatedPointsFilter } from './pointsFilter';
+import { getTimeScaleRange } from './timeScale';
+import { addValueLabels } from './valueLabels';
 
 // unit lookup needed to determine if we want power-of-2 or power-of-10 axis ticks
 // see categories.ts is @grafana/data
@@ -87,19 +75,6 @@ const BIN_INCRS = Array(53);
 for (let i = 0; i < BIN_INCRS.length; i++) {
   BIN_INCRS[i] = 2 ** i;
 }
-
-import { DrawStyle } from '@grafana/ui';
-import {
-  UPlotConfigBuilder,
-  type UPlotConfigPrepFn,
-  getScaleGradientFn,
-  buildScaleKey,
-  getStackingGroups,
-  preparePlotData2,
-  type AxisProps,
-} from '@grafana/ui/internal';
-
-import { ANNOTATION_LANE_SIZE } from '../../../plugins/panel/timeseries/plugins/utils';
 
 // See UPlotAxisBuilder.ts::calculateAxisSize for default axis size calculation
 const UPLOT_DEFAULT_AXIS_SIZE = 17;
@@ -163,30 +138,7 @@ export const preparePlotConfigBuilder: UPlotConfigPrepFn = ({
       orientation: isHorizontal ? ScaleOrientation.Horizontal : ScaleOrientation.Vertical,
       direction: isHorizontal ? ScaleDirection.Right : ScaleDirection.Up,
       isTime: true,
-      range: () => {
-        const state = builder.getState();
-        if (state.isPanning) {
-          if (state.isTimeRangePending) {
-            const timeRange = getTimeRange();
-            const propsFrom = timeRange.from.valueOf();
-            const propsTo = timeRange.to.valueOf();
-
-            const MIN_TIMESPAN_MS = 1;
-            const fromMatches = Math.abs(propsFrom - state.min) <= MIN_TIMESPAN_MS;
-            const toMatches = Math.abs(propsTo - state.max) <= MIN_TIMESPAN_MS;
-            const timeRangeHasUpdated = fromMatches && toMatches;
-
-            if (timeRangeHasUpdated) {
-              builder.setState({ isPanning: false });
-              return [propsFrom, propsTo];
-            }
-          }
-
-          return [state.min, state.max];
-        }
-        const timeRange = getTimeRange();
-        return [timeRange.from.valueOf(), timeRange.to.valueOf()];
-      },
+      range: getTimeScaleRange(builder, getTimeRange),
     });
 
     // filters first 2 ticks to make space for timezone labels
@@ -422,75 +374,7 @@ export const preparePlotConfigBuilder: UPlotConfigPrepFn = ({
     let pointsFilter: uPlot.Series.Points.Filter = () => null;
 
     if (customConfig.spanNulls !== true && showPoints === VisibilityMode.Auto) {
-      pointsFilter = (u, seriesIdx, show, gaps) => {
-        let filtered = [];
-
-        if (!show) {
-          const yData = u.data[seriesIdx];
-
-          if (gaps && gaps.length) {
-            const firstIdx = u.posToIdx(gaps[0][0], true);
-
-            if (yData[firstIdx - 1] == null) {
-              filtered.push(firstIdx);
-            }
-
-            // show single points between consecutive gaps that share end/start
-            for (let i = 0; i < gaps.length; i++) {
-              let thisGap = gaps[i];
-              let nextGap = gaps[i + 1];
-
-              if (nextGap && thisGap[1] === nextGap[0]) {
-                // approx when data density is > 1pt/px, since gap start/end pixels are rounded
-                let approxIdx = u.posToIdx(thisGap[1], true);
-
-                if (yData[approxIdx] == null) {
-                  // scan left/right alternating to find closest index with non-null value
-                  for (let j = 1; j < 100; j++) {
-                    if (yData[approxIdx + j] != null) {
-                      approxIdx += j;
-                      break;
-                    }
-                    if (yData[approxIdx - j] != null) {
-                      approxIdx -= j;
-                      break;
-                    }
-                  }
-                }
-
-                filtered.push(approxIdx);
-              }
-            }
-
-            const lastIdx = u.posToIdx(gaps[gaps.length - 1][1], true);
-
-            if (yData[lastIdx + 1] == null) {
-              filtered.push(lastIdx);
-            }
-          }
-          // single point
-          else {
-            // scan right
-            let leftIdx = 0;
-            while (yData[leftIdx] === null) {
-              leftIdx++;
-            }
-
-            // scan left
-            let rightIdx = yData.length - 1;
-            while (rightIdx >= leftIdx && yData[rightIdx] === null) {
-              rightIdx--;
-            }
-
-            // render if same
-            if (leftIdx === rightIdx) {
-              filtered.push(leftIdx);
-            }
-          }
-        }
-
-        return filtered.length ? filtered : null;
-      };
+      pointsFilter = isolatedPointsFilter;
     }
 
     let { fillOpacity } = customConfig;
@@ -634,79 +518,7 @@ export const preparePlotConfigBuilder: UPlotConfigPrepFn = ({
 
   builder.setStackingGroups(stackingGroups);
 
-  const mightShowValues = frame.fields.some((field, i) => {
-    if (i === 0) {
-      return false;
-    }
-
-    const customConfig = field.config.custom ?? {};
-
-    return (
-      customConfig.showValues &&
-      (customConfig.drawStyle === GraphDrawStyle.Points || customConfig.showPoints !== VisibilityMode.Never)
-    );
-  });
-
-  if (mightShowValues) {
-    // since bars style doesnt show points in Auto mode, we can't piggyback on series.points.show()
-    // so we make a simple density-based callback to use here
-    const barsShowValues = (u: uPlot) => {
-      let width = u.bbox.width / uPlot.pxRatio;
-      let count = u.data[0].length;
-
-      // render values when each has at least 30px of width available
-      return width / count >= 30;
-    };
-
-    builder.addHook('draw', (u: uPlot) => {
-      const baseFontSize = 12;
-      const font = `${baseFontSize * uPlot.pxRatio}px ${theme.typography.fontFamily}`;
-
-      const { ctx } = u;
-
-      ctx.save();
-      ctx.fillStyle = theme.colors.text.primary;
-      ctx.font = font;
-      ctx.textAlign = 'center';
-
-      for (let seriesIdx = 1; seriesIdx < u.data.length; seriesIdx++) {
-        const series = u.series[seriesIdx];
-        const field = frame.fields[seriesIdx];
-
-        if (
-          series.show &&
-          field.config.custom?.showValues &&
-          // @ts-ignore points.show() is always callable on the instance (but may be boolean when passed to uPlot as init option)
-          (series.points?.show?.(u, seriesIdx) ||
-            (field.config.custom?.drawStyle === DrawStyle.Bars && barsShowValues(u)))
-        ) {
-          const xData = u.data[0];
-          const yData = u.data[seriesIdx];
-          const yScale = series.scale!;
-
-          for (let dataIdx = 0; dataIdx < yData.length; dataIdx++) {
-            const yVal = yData[dataIdx];
-
-            if (yVal != null) {
-              const text = formattedValueToString(field.display!(yVal));
-
-              const isNegative = yVal < 0;
-              const textOffset = isNegative ? 15 : -5;
-              ctx.textBaseline = isNegative ? 'top' : 'bottom';
-
-              const xVal = xData[dataIdx];
-              const x = u.valToPos(xVal, 'x', true);
-              const y = u.valToPos(yVal, yScale, true);
-
-              ctx.fillText(text, x, y + textOffset);
-            }
-          }
-        }
-      }
-
-      ctx.restore();
-    });
-  }
+  addValueLabels(builder, frame, theme);
 
   // hook up custom/composite renderers
   renderers?.forEach((r) => {
@@ -723,37 +535,7 @@ export const preparePlotConfigBuilder: UPlotConfigPrepFn = ({
     r.init(builder, fieldIndices);
   });
 
-  // if hovered value is null, how far we may scan left/right to hover nearest non-null
-  const DEFAULT_HOVER_NULL_PROXIMITY = 15;
-  const DEFAULT_FOCUS_PROXIMITY = 30;
-
-  let cursor: Partial<uPlot.Cursor> = {
-    // horizontal proximity / point hover behavior
-    hover: {
-      prox: (self, seriesIdx, hoveredIdx) => {
-        if (hoverProximity != null) {
-          return hoverProximity;
-        }
-
-        // when hovering null values, scan data left/right up to 15px
-        const yVal = self.data[seriesIdx][hoveredIdx];
-        if (yVal === null) {
-          return DEFAULT_HOVER_NULL_PROXIMITY;
-        }
-
-        // no proximity limit
-        return null;
-      },
-      skip: [null],
-    },
-    // vertical proximity / series focus behavior
-    focus: {
-      prox: hoverProximity ?? DEFAULT_FOCUS_PROXIMITY,
-    },
-    points: { one: true },
-  };
-
-  builder.setCursor(cursor);
+  builder.setCursor(getCursorConfig(hoverProximity));
 
   return builder;
 };
