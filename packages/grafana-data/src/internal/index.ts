@@ -143,11 +143,8 @@ export { createFieldsOrdererAuto } from '../transformations/transformers/order';
 export { getRowIdentity } from '../transformations/frameIdentity';
 
 export { filterByValueTransformer, type FilterByValueConfig } from '../transformations/transformers/filterByValue';
-export {
-  type ValueSetOptions,
-  isPillCellField,
-  getValueSetCandidates,
-} from '../transformations/matchers/valueMatchers/setMatchers';
+export { type ValueSetOptions } from '../transformations/matchers/valueMatchers/types';
+export { isPillCellField, getValueSetCandidates } from '../transformations/matchers/valueMatchers/setMatchers';
 export { getPillElements } from '../transformations/matchers/pillElements';
 export { dateTimeFormatTimeAgoShort } from '../datetime/formatter';
 export { getAllowedRestrictedGrafanaApis } from '../context/plugins/RestrictedGrafanaApis';
