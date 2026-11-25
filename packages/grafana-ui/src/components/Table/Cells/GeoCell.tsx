@@ -1,19 +1,12 @@
 import type { JSX } from 'react';
 
-import { isGeometry, useOpenLayersContext } from '../geo';
+import { formatGeoCellValue, useOpenLayersContext } from '../geo';
 import { type TableCellProps } from '../types';
 
 export function GeoCell(props: TableCellProps): JSX.Element {
   const { cell, tableStyles, cellProps } = props;
   const { formatGeometry } = useOpenLayersContext();
-
-  let disp = '';
-
-  if (formatGeometry && isGeometry(cell.value)) {
-    disp = formatGeometry(cell.value);
-  } else if (cell.value != null) {
-    disp = `${cell.value}`;
-  }
+  const disp = formatGeoCellValue(cell.value, formatGeometry);
 
   return (
     <div {...cellProps} className={tableStyles.cellContainer}>

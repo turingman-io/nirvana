@@ -1,6 +1,6 @@
 import { lazy } from 'react';
 
-export { hasGeoCell, isGeometry } from './utils';
+export { formatGeoCellValue, hasGeoCell, isGeometry } from './utils';
 export { type OpenLayersContextValue, useOpenLayersContext } from './OpenLayersContext';
 
 export const LazyOpenLayersProvider = lazy(() =>
