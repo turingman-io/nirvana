@@ -1,13 +1,12 @@
 import { sortBy } from 'lodash';
 import * as React from 'react';
-import { type JSX, useEffect, useMemo } from 'react';
+import { type JSX, useMemo } from 'react';
 import { Controller, type FieldErrors, useFormContext } from 'react-hook-form';
 
 import { type SelectableValue } from '@grafana/data';
 import { selectors } from '@grafana/e2e-selectors';
 import { Trans, t } from '@grafana/i18n';
 import { Alert, Badge, Box, Button, Field, Select, Stack, Text } from '@grafana/ui';
-import { type NotificationChannelOption } from 'app/features/alerting/unified/types/alerting';
 
 import {
   type ChannelValues,
@@ -28,11 +27,12 @@ import { OnCallIntegrationType } from '../grafanaAppReceivers/onCall/useOnCallIn
 import { ChannelOptions } from './ChannelOptions';
 import { CollapsibleSection } from './CollapsibleSection';
 import { type Notifier } from './notifiers';
+import { useIntegrationSettings } from './useIntegrationSettings';
+import { getIntegrationPaths } from './util';
 
 interface Props<R extends ChannelValues> {
   defaultValues: R;
   initialValues?: R;
-  pathPrefix: `items.${number}.`;
   integrationIndex: number;
   notifiers: Notifier[];
   onDuplicate: () => void;
@@ -51,7 +51,6 @@ interface Props<R extends ChannelValues> {
 export function ChannelSubForm<R extends ChannelValues>({
   defaultValues,
   initialValues,
-  pathPrefix,
   integrationIndex,
   onDuplicate,
   onDelete,
@@ -67,119 +66,22 @@ export function ChannelSubForm<R extends ChannelValues>({
   // The backend only checks protected fields of integrations it already knows (matched by uid),
   // so a newly added integration is free to set them
   const canEditProtectedFields = canModifyProtectedFields || !initialValues;
-  const { control, watch, register, trigger, formState, setValue, getValues, unregister } =
+  const { control, watch, trigger, formState } =
     useFormContext<ReceiverFormValues<CloudChannelValues | GrafanaChannelValues>>();
 
-  const channelFieldPath = `items.${integrationIndex}` as const;
-  const typeFieldPath = `${channelFieldPath}.type` as const;
-  const versionFieldPath = `${channelFieldPath}.version` as const;
-  const settingsFieldPath = `${channelFieldPath}.settings` as const;
-  const secureFieldsPath = `${channelFieldPath}.secureFields` as const;
-
-  const selectedType = watch(typeFieldPath) ?? defaultValues.type;
-  const parse_mode = watch(`${settingsFieldPath}.parse_mode`);
+  const paths = useMemo(() => getIntegrationPaths(integrationIndex), [integrationIndex]);
+  const parse_mode = watch(`${paths.settingsPrefix}parse_mode`);
 
   // TODO I don't like integration specific code here but other ways require a bigger refactoring
-  const onCallIntegrationType = watch(`${settingsFieldPath}.integration_type`);
+  const onCallIntegrationType = watch(`${paths.settingsPrefix}integration_type`);
   const isTestAvailable = onCallIntegrationType !== OnCallIntegrationType.NewIntegration;
 
-  useEffect(() => {
-    register(`${channelFieldPath}.__id`);
-    /* Need to manually register secureFields or else they'll
-     be lost when testing a contact point */
-    register(`${channelFieldPath}.secureFields`);
-  }, [register, channelFieldPath]);
-
-  // Prevent forgetting about initial values when switching the integration type and the oncall integration type
-  useEffect(() => {
-    // Restore values when switching back from a changed integration to the default one
-    const subscription = watch((formValues, { name, type }) => {
-      // @ts-expect-error name is valid key for formValues
-      const value = name ? getValues(name, formValues) : '';
-      if (initialValues && name === typeFieldPath && value === initialValues.type && type === 'change') {
-        setValue(settingsFieldPath, initialValues.settings);
-        setValue(secureFieldsPath, initialValues.secureFields);
-      } else if (name === typeFieldPath && type === 'change') {
-        // When switching to a new notifier, set the default settings to remove all existing settings
-        // from the previous notifier
-        const newNotifier = notifiers.find(({ dto: { type } }) => type === value);
-        const defaultNotifierSettings = newNotifier ? getDefaultNotifierSettings(newNotifier) : {};
-
-        // Not sure why, but verriding settingsFieldPath is not enough if notifiers have the same settings fields, like url, title
-        const currentSettings = getValues(settingsFieldPath) ?? {};
-        Object.keys(currentSettings).forEach((key) => {
-          if (!defaultNotifierSettings[key]) {
-            setValue(`${settingsFieldPath}.${key}`, defaultNotifierSettings[key]);
-          }
-        });
-
-        setValue(settingsFieldPath, defaultNotifierSettings);
-        setValue(secureFieldsPath, {});
-
-        // Reset version when changing type - backend will use its default
-        setValue(versionFieldPath, undefined);
-      }
-
-      // Restore initial value of an existing oncall integration
-      if (
-        initialValues &&
-        name === `${settingsFieldPath}.integration_type` &&
-        value === OnCallIntegrationType.ExistingIntegration
-      ) {
-        setValue(`${settingsFieldPath}.url`, initialValues.settings.url);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, [
-    selectedType,
+  const { selectedType, resetSecureField, deleteSubform } = useIntegrationSettings({
+    paths,
+    defaultValues,
     initialValues,
-    setValue,
-    settingsFieldPath,
-    typeFieldPath,
-    versionFieldPath,
-    secureFieldsPath,
-    getValues,
-    watch,
-    defaultValues.settings,
-    defaultValues.secureFields,
     notifiers,
-  ]);
-
-  const onResetSecureField = (key: string) => {
-    // formSecureFields might not be up to date if this function is called multiple times in a row
-    const currentSecureFields = getValues(`${channelFieldPath}.secureFields`);
-    if (currentSecureFields[key]) {
-      setValue(`${channelFieldPath}.secureFields`, { ...currentSecureFields, [key]: '' });
-    }
-  };
-
-  const findSecureFieldsRecursively = (options: NotificationChannelOption[]): string[] => {
-    const secureFields: string[] = [];
-    options?.forEach((option) => {
-      if (option.secure && option.secureFieldKey) {
-        secureFields.push(option.secureFieldKey);
-      }
-      if (option.subformOptions) {
-        secureFields.push(...findSecureFieldsRecursively(option.subformOptions));
-      }
-    });
-    return secureFields;
-  };
-
-  const onDeleteSubform = (settingsPath: string, option: NotificationChannelOption) => {
-    // Get all subform options with secure=true recursively.
-    const relatedSecureFields = findSecureFieldsRecursively(option.subformOptions ?? []);
-    relatedSecureFields.forEach((key) => {
-      onResetSecureField(key);
-    });
-    const fieldPath = settingsPath.startsWith(`${channelFieldPath}.settings.`)
-      ? settingsPath.slice(`${channelFieldPath}.settings.`.length)
-      : settingsPath;
-    const fullPath = `${settingsFieldPath}.${fieldPath}` as const;
-    unregister(fullPath);
-    setValue(fullPath, undefined);
-  };
+  });
 
   const typeOptions = useMemo((): SelectableValue[] => {
     // Non-creatable notifiers (e.g., WeChat which is v0-only, or types the admin has disallowed
@@ -243,7 +145,7 @@ export function ChannelSubForm<R extends ChannelValues>({
   const mandatoryOptions = versionedOptions.filter((o) => o.required);
   const optionalOptions = versionedOptions.filter((o) => !o.required);
 
-  const contactPointTypeInputId = `contact-point-type-${pathPrefix}`;
+  const contactPointTypeInputId = `contact-point-type-${paths.prefix}`;
   return (
     <Box
       marginY={2}
@@ -259,13 +161,13 @@ export function ChannelSubForm<R extends ChannelValues>({
             <Field
               label={t('alerting.channel-sub-form.label-integration', 'Integration')}
               htmlFor={contactPointTypeInputId}
-              data-testid={selectors.pages.Alerting.ContactPointForm.integrationTypeField(pathPrefix)}
+              data-testid={selectors.pages.Alerting.ContactPointForm.integrationTypeField(paths.prefix)}
               noMargin
             >
               <Stack direction="row" alignItems="center" wrap="wrap" gap={1}>
                 <Box width={37} maxWidth="100%" minWidth={0}>
                   <Controller
-                    name={typeFieldPath}
+                    name={paths.type}
                     control={control}
                     defaultValue={defaultValues.type}
                     render={({ field: { ref, onChange, ...field } }) => (
@@ -321,7 +223,7 @@ export function ChannelSubForm<R extends ChannelValues>({
                 )}
                 {onDelete && (
                   <Button
-                    data-testid={`${pathPrefix}delete-button`}
+                    data-testid={`${paths.prefix}delete-button`}
                     size="xs"
                     variant="secondary"
                     type="button"
@@ -356,9 +258,9 @@ export function ChannelSubForm<R extends ChannelValues>({
               defaultValues={defaultValues}
               selectedChannelOptions={mandatoryOptions.length ? mandatoryOptions : optionalOptions}
               errors={errors}
-              onResetSecureField={onResetSecureField}
-              onDeleteSubform={onDeleteSubform}
-              integrationPrefix={channelFieldPath}
+              onResetSecureField={resetSecureField}
+              onDeleteSubform={deleteSubform}
+              paths={paths}
               readOnly={!isEditable}
               canEditProtectedFields={canEditProtectedFields}
               customValidators={customValidators}
@@ -377,10 +279,10 @@ export function ChannelSubForm<R extends ChannelValues>({
                 <ChannelOptions<R>
                   defaultValues={defaultValues}
                   selectedChannelOptions={optionalOptions}
-                  onResetSecureField={onResetSecureField}
-                  onDeleteSubform={onDeleteSubform}
+                  onResetSecureField={resetSecureField}
+                  onDeleteSubform={deleteSubform}
                   errors={errors}
-                  integrationPrefix={channelFieldPath}
+                  paths={paths}
                   readOnly={!isEditable}
                   canEditProtectedFields={canEditProtectedFields}
                   customValidators={customValidators}
@@ -390,21 +292,11 @@ export function ChannelSubForm<R extends ChannelValues>({
             <CollapsibleSection
               label={t('alerting.channel-sub-form.label-notification-settings', 'Notification settings')}
             >
-              <CommonSettingsComponent pathPrefix={pathPrefix} readOnly={!isEditable} />
+              <CommonSettingsComponent pathPrefix={paths.prefix} readOnly={!isEditable} />
             </CollapsibleSection>
           </Box>
         )}
       </Stack>
     </Box>
   );
-}
-
-function getDefaultNotifierSettings(notifier: Notifier): Record<string, string> {
-  const defaultSettings: Record<string, string> = {};
-  getOptionsForVersion(notifier.dto).forEach((option) => {
-    if (option.defaultValue?.value) {
-      defaultSettings[option.propertyName] = option.defaultValue?.value;
-    }
-  });
-  return defaultSettings;
 }

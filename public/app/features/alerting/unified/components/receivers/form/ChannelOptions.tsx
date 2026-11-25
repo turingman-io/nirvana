@@ -12,24 +12,27 @@ import {
 import {
   type ChannelValues,
   type CloudChannelValues,
+  type DeleteSubformHandler,
   type GrafanaChannelValues,
   type ReceiverFormValues,
+  type ResetSecureFieldHandler,
 } from '../../../types/receiver-form';
 
 import { ConfiguredSecretInput, OptionField, ProtectedFieldLabel } from './fields/OptionField';
+import { type IntegrationPaths } from './util';
 
 export interface Props<R extends ChannelValues> {
   defaultValues: R;
   selectedChannelOptions: NotificationChannelOption[];
 
-  onResetSecureField: (key: string) => void;
-  onDeleteSubform?: (settingsPath: string, option: NotificationChannelOption) => void;
+  onResetSecureField: ResetSecureFieldHandler;
+  onDeleteSubform?: DeleteSubformHandler;
   errors?: FieldErrors<R>;
   /**
-   * The path for the integration in the array of integrations.
+   * The form paths of the integration in the array of integrations.
    * This is used to access the settings and secure fields for the integration in a type-safe way.
    */
-  integrationPrefix: `items.${number}`;
+  paths: IntegrationPaths;
   canEditProtectedFields: boolean;
   readOnly?: boolean;
   customValidators?: Record<string, React.ComponentProps<typeof OptionField>['customValidator']>;
@@ -41,17 +44,14 @@ export function ChannelOptions<R extends ChannelValues>({
   onResetSecureField,
   onDeleteSubform,
   errors,
-  integrationPrefix,
+  paths,
   readOnly = false,
   customValidators = {},
   canEditProtectedFields,
 }: Props<R>): JSX.Element {
   const { watch } = useFormContext<ReceiverFormValues<CloudChannelValues | GrafanaChannelValues>>();
 
-  const [settings, secureFields] = watch([`${integrationPrefix}.settings`, `${integrationPrefix}.secureFields`]);
-
-  // Note: settingsPath includes a trailing dot for OptionField, unlike the path used in watch()
-  const settingsPath = `${integrationPrefix}.settings.` as const;
+  const [settings, secureFields] = watch([paths.settings, paths.secureFields]);
 
   const getOptionMeta = (option: NotificationChannelOption): OptionMeta => ({
     required: determineRequired(option, settings, secureFields),
@@ -80,11 +80,11 @@ export function ChannelOptions<R extends ChannelValues>({
               key={key}
               label={isLocked ? <ProtectedFieldLabel label={option.label} /> : option.label}
               description={option.description}
-              htmlFor={`${settingsPath}${option.propertyName}`}
+              htmlFor={`${paths.settingsPrefix}${option.propertyName}`}
               noMargin
             >
               <ConfiguredSecretInput
-                id={`${settingsPath}${option.propertyName}`}
+                id={`${paths.settingsPrefix}${option.propertyName}`}
                 readOnly={readOnly || isLocked}
                 onReset={() => onResetSecureField(option.secureFieldKey ?? option.propertyName)}
               />
@@ -110,7 +110,7 @@ export function ChannelOptions<R extends ChannelValues>({
             readOnly={readOnly}
             key={key}
             error={error}
-            pathPrefix={settingsPath}
+            pathPrefix={paths.settingsPrefix}
             option={option}
             customValidator={customValidators[option.propertyName]}
             getOptionMeta={getOptionMeta}

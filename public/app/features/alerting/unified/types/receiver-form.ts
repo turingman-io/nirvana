@@ -1,6 +1,10 @@
 import type * as React from 'react';
 
-import { type CloudNotifierType, type NotifierType } from 'app/features/alerting/unified/types/alerting';
+import {
+  type CloudNotifierType,
+  type NotificationChannelOption,
+  type NotifierType,
+} from 'app/features/alerting/unified/types/alerting';
 import { type GrafanaManagedReceiverConfig } from 'app/plugins/datasource/alertmanager/types';
 
 import { type ControlledField } from '../hooks/useControlledFieldArray';
@@ -35,6 +39,11 @@ export interface CommonSettingsComponentProps {
   readOnly?: boolean;
 }
 export type CommonSettingsComponentType = React.ComponentType<CommonSettingsComponentProps>;
+
+/** Clears a configured secure field of an integration, so that a new value can be entered */
+export type ResetSecureFieldHandler = (secureFieldKey: string) => void;
+/** Deletes a subform of an integration's settings, given the form path of the subform */
+export type DeleteSubformHandler = (subformPath: string, option: NotificationChannelOption) => void;
 
 export type CloudChannelConfig = {
   send_resolved: boolean;

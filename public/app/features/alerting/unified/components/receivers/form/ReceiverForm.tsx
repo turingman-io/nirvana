@@ -203,7 +203,6 @@ export function ReceiverForm<R extends ChannelValues>({
                   : undefined
               }
               onDelete={() => remove(index)}
-              pathPrefix={pathPrefix}
               notifiers={notifiers}
               // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
               errors={errors?.items?.[index] as FieldErrors<R> | undefined}
