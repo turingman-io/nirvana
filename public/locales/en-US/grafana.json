@@ -8263,9 +8263,6 @@
     "save-dashboard-as-form": {
       "aria-label-save-dashboard-description-field": "Save dashboard description field",
       "aria-label-save-dashboard-title-field": "Save dashboard title field",
-      "cancel-button": {
-        "cancel": "Cancel"
-      },
       "label-copy-tags": "Copy tags",
       "label-folder": "Folder",
       "required": "Required"
@@ -8331,7 +8328,6 @@
     },
     "save-provisioned-dashboard-form": {
       "advanced-options": "Advanced options",
-      "cancel": "Cancel",
       "cancel-folder": "Cancel",
       "cannot-be-saved": "This dashboard cannot be saved from the Grafana UI because it has been provisioned from another source. Copy the JSON or save it to a file below, then you can update your dashboard in the provisioning source.",
       "copy-json-to-clipboard": "Copy JSON to clipboard",

@@ -2,14 +2,21 @@ import { useState } from 'react';
 
 import { selectors } from '@grafana/e2e-selectors';
 import { Trans, t } from '@grafana/i18n';
-import { Button, Checkbox, TextArea, Stack, Alert, Box, Field } from '@grafana/ui';
-import { type SaveDashboardOptions } from 'app/features/dashboard/components/SaveDashboard/types';
+import { Checkbox, Stack, Alert, Box } from '@grafana/ui';
 
 import { type DashboardScene } from '../scene/DashboardScene';
 
 import { type SaveDashboardDrawer } from './SaveDashboardDrawer';
+import { MAX_SAVE_MESSAGE_LENGTH, SaveMessageField, SaveMessageLengthAlert } from './SaveFormFields';
 import { getSaveDashboardErrorInfo } from './saveErrors';
-import { type DashboardChangeInfo, SaveButton, SaveDashboardErrorAlert } from './shared';
+import { getSaveDashboardFormDefaults } from './saveFormDefaults';
+import {
+  type DashboardChangeInfo,
+  SaveButton,
+  SaveConflictAlert,
+  SaveDashboardErrorAlert,
+  SaveFormActions,
+} from './shared';
 import { useSaveDashboard } from './useSaveDashboard';
 
 export interface Props {
@@ -22,20 +29,7 @@ export function SaveDashboardForm({ dashboard, drawer, changeInfo }: Props) {
   const { hasChanges, hasMigratedToV2, changedSaveModel } = changeInfo;
 
   const { state, onSaveDashboard } = useSaveDashboard(false);
-  const k8sMeta = dashboard.serializer.getK8SMetadata();
-  const [options, setOptions] = useState<SaveDashboardOptions>({
-    folderUid: dashboard.state.meta.folderUid,
-    // we need to set the uid here in order to save the dashboard
-    // in schema v2 we don't have the uid in the spec
-    // meta.k8s.annotations is the editor source of truth for the denylist / other client annotations
-    k8s: {
-      ...k8sMeta,
-      annotations: {
-        ...k8sMeta?.annotations,
-        ...dashboard.state.meta.k8s?.annotations,
-      },
-    },
-  });
+  const [options, setOptions] = useState(() => getSaveDashboardFormDefaults(dashboard));
 
   const onSave = async (overwrite: boolean) => {
     // Re-merge annotations at save time so denylist edits after the form mounted still persist.
@@ -60,61 +54,23 @@ export function SaveDashboardForm({ dashboard, drawer, changeInfo }: Props) {
     }
   };
 
-  const cancelButton = (
-    <Button variant="secondary" onClick={drawer.onClose} fill="outline">
-      <Trans i18nKey="dashboard-scene.save-dashboard-form.cancel-button.cancel">Cancel</Trans>
-    </Button>
-  );
-
   const saveButton = (overwrite: boolean) => (
     <SaveButton isValid={hasChanges} isLoading={state.loading} onSave={onSave} overwrite={overwrite} />
   );
 
-  const isMessageTooLongError = (message?: string) => {
-    return message && message.length > 500;
-  };
-
   function renderFooter(error?: Error) {
-    if (isMessageTooLongError(options.message)) {
-      const messageLength = options.message?.length ?? 0;
-
-      return (
-        <Alert title={t('save-dashboards.message-length.title', 'Message too long')} severity="error">
-          <p>
-            <Trans i18nKey="save-dashboards.message-length.info">
-              The message is {{ messageLength }} characters, which exceeds the maximum length of 500 characters. Please
-              shorten it before saving.
-            </Trans>
-          </p>
-        </Alert>
-      );
+    const messageLength = options.message?.length ?? 0;
+    if (messageLength > MAX_SAVE_MESSAGE_LENGTH) {
+      return <SaveMessageLengthAlert messageLength={messageLength} />;
     }
 
     const errorInfo = getSaveDashboardErrorInfo(error);
 
     if (errorInfo?.kind === 'version-mismatch') {
       return (
-        <Alert
-          title={t(
-            'dashboard-scene.save-dashboard-form.render-footer.title-someone-else-has-updated-this-dashboard',
-            'Someone else has updated this dashboard'
-          )}
-          severity="error"
-        >
-          <p>
-            <Trans i18nKey="dashboard-scene.save-dashboard-form.render-footer.would-still-dashboard">
-              Would you still like to save this dashboard?
-            </Trans>
-          </p>
-          {/* Bare text: a <p> here would stack its bottom margin onto the Box padding below. */}
-          {errorInfo.message}
-          <Box paddingTop={2}>
-            <Stack alignItems="center">
-              {saveButton(true)}
-              {cancelButton}
-            </Stack>
-          </Box>
-        </Alert>
+        <SaveConflictAlert message={errorInfo.message}>
+          <SaveFormActions drawer={drawer} saveButton={saveButton(true)} />
+        </SaveConflictAlert>
       );
     }
 
@@ -131,10 +87,7 @@ export function SaveDashboardForm({ dashboard, drawer, changeInfo }: Props) {
             </Trans>
           </p>
           <Box paddingTop={2}>
-            <Stack alignItems="center">
-              {saveButton(true)}
-              {cancelButton}
-            </Stack>
+            <SaveFormActions drawer={drawer} saveButton={saveButton(true)} />
           </Box>
         </Alert>
       );
@@ -146,17 +99,7 @@ export function SaveDashboardForm({ dashboard, drawer, changeInfo }: Props) {
     return (
       <>
         {errorInfo && <SaveDashboardErrorAlert info={errorInfo} />}
-        <Stack alignItems="center">
-          {saveButton(false)}
-          {cancelButton}
-          {!hasChanges && (
-            <div>
-              <Trans i18nKey="dashboard-scene.save-dashboard-form.render-footer.no-changes-to-save">
-                No changes to save
-              </Trans>
-            </div>
-          )}
-        </Stack>
+        <SaveFormActions drawer={drawer} saveButton={saveButton(false)} showNoChanges={!hasChanges} />
       </>
     );
   }
@@ -182,24 +125,7 @@ export function SaveDashboardForm({ dashboard, drawer, changeInfo }: Props) {
           </p>
         </Alert>
       )}
-      <Field label={t('dashboard-scene.save-dashboard-form.label-message', 'Message')} noMargin>
-        <TextArea
-          aria-label={t('dashboard-scene.save-dashboard-form.aria-label-message', 'message')}
-          value={options.message ?? ''}
-          onChange={(e) => {
-            setOptions({
-              ...options,
-              message: e.currentTarget.value,
-            });
-          }}
-          placeholder={t(
-            'dashboard-scene.save-dashboard-form.placeholder-describe-changes-optional',
-            'Add a note to describe your changes (optional).'
-          )}
-          autoFocus
-          rows={5}
-        />
-      </Field>
+      <SaveMessageField value={options.message ?? ''} onChange={(message) => setOptions({ ...options, message })} />
       {renderFooter(state.error)}
     </Stack>
   );

@@ -8,7 +8,7 @@ import { Trans, t } from '@grafana/i18n';
 import { locationService, reportInteraction } from '@grafana/runtime';
 import { type Dashboard } from '@grafana/schema';
 import { type Spec as DashboardV2Spec } from '@grafana/schema/apis/dashboard.grafana.app/v2';
-import { Alert, Button, Field, Input, Stack, TextArea, Switch } from '@grafana/ui';
+import { Alert, Button, Field, Input, Stack, TextArea } from '@grafana/ui';
 import {
   type RepositoryView,
   type ResourceWrapper,
@@ -24,7 +24,8 @@ import {
   getCommittedPendingChanges,
 } from 'app/features/dashboard-scene/lifecycle/pendingChangesSave';
 import { SaveDashboardFormCommonOptions } from 'app/features/dashboard-scene/saving/SaveDashboardForm';
-import { nextMetaAfterFolderPick } from 'app/features/dashboard-scene/saving/shared';
+import { CopyTagsField } from 'app/features/dashboard-scene/saving/SaveFormFields';
+import { SaveFormCancelButton, nextMetaAfterFolderPick } from 'app/features/dashboard-scene/saving/shared';
 import { useParkSaveFormDraft } from 'app/features/dashboard-scene/saving/useParkSaveFormDraft';
 import { getDashboardUrl } from 'app/features/dashboard-scene/utils/getDashboardUrl';
 import { dashboardWatcher } from 'app/features/live/dashboard/dashboardWatcher';
@@ -608,11 +609,7 @@ export function SaveProvisionedDashboardForm({
             lockBranch={lockBranch}
           />
 
-          {saveAsCopy && (
-            <Field noMargin label={t('dashboard-scene.save-dashboard-as-form.label-copy-tags', 'Copy tags')}>
-              <Switch {...register('copyTags')} />
-            </Field>
-          )}
+          {saveAsCopy && <CopyTagsField {...register('copyTags')} />}
 
           {error && <ProvisioningAlert error={error} />}
 
@@ -644,9 +641,7 @@ export function SaveProvisionedDashboardForm({
           )}
 
           <Stack gap={2}>
-            <Button variant="secondary" onClick={drawer.onClose} fill="outline">
-              <Trans i18nKey="dashboard-scene.save-provisioned-dashboard-form.cancel">Cancel</Trans>
-            </Button>
+            <SaveFormCancelButton drawer={drawer} />
             <Button
               variant={stalePendingChanges ? 'destructive' : 'primary'}
               type="submit"

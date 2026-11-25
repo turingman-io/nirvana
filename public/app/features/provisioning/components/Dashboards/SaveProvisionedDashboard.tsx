@@ -1,7 +1,6 @@
-import { useState } from 'react';
-
 import { type SaveDashboardDrawer } from 'app/features/dashboard-scene/saving/SaveDashboardDrawer';
 import { type DashboardChangeInfo } from 'app/features/dashboard-scene/saving/shared';
+import { useSaveFormDraft } from 'app/features/dashboard-scene/saving/useParkSaveFormDraft';
 import { type DashboardScene } from 'app/features/dashboard-scene/scene/DashboardScene';
 
 import { type DashboardRepositoryView } from '../../hooks/useDashboardRepositoryView';
@@ -32,9 +31,7 @@ export function SaveProvisionedDashboard({
   recoverToNewBranch,
   view,
 }: Props) {
-  // Read once: the draft is what the previous form showed at the swap. Following it per render would recompute the
-  // defaults on every keystroke the form parks and rewrite the path the user is editing
-  const [draft] = useState(() => drawer.saveFormDraft);
+  const draft = useSaveFormDraft(drawer);
   const { defaultValues, canPushToConfiguredBranch, readOnly, repository, repoDataStatus, error } =
     useProvisionedDashboardData(dashboard, view, { saveAsCopy, recoverToNewBranch, ...draft });
 
