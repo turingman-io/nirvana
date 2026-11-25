@@ -3,7 +3,7 @@ import { useMemo, useRef, useState } from 'react';
 
 import { DashboardCursorSync, type PanelProps, type TimeRange } from '@grafana/data';
 import { PanelDataErrorView } from '@grafana/runtime';
-import { type LegendPlacement, type ScaleDistributionConfig } from '@grafana/schema';
+import { type ScaleDistributionConfig } from '@grafana/schema';
 import {
   EventBusPlugin,
   TooltipDisplayMode,
@@ -15,7 +15,7 @@ import {
   VizLayout,
   XAxisInteractionAreaPlugin,
 } from '@grafana/ui';
-import { type FacetedData, type TimeRange2, TooltipHoverMode } from '@grafana/ui/internal';
+import { type FacetedData, getVizLayoutLegendPlacement, type TimeRange2, TooltipHoverMode } from '@grafana/ui/internal';
 import { ColorScale } from 'app/core/components/ColorScale/ColorScale';
 
 import { getXAxisConfig } from '../../../core/components/TimeSeries/utils';
@@ -154,14 +154,9 @@ const HeatmapPanelViz = ({
       return null;
     }
 
-    let placement: LegendPlacement = options.legend.placement ?? 'bottom';
-
-    // VizLayout forces bottom placement on narrow screens; mirror that here so
+    // follow VizLayout's placement, which is always bottom on narrow screens, so
     // we don't render a full-height vertical scale into a bottom strip
-    if (document.body.clientWidth < theme.breakpoints.values.lg) {
-      placement = 'bottom';
-    }
-
+    const placement = getVizLayoutLegendPlacement(options.legend.placement ?? 'bottom', theme);
     const isRight = placement === 'right';
 
     return (

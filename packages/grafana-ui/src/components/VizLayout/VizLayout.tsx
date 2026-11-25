@@ -1,15 +1,16 @@
 import { css } from '@emotion/css';
 import { type FC, type CSSProperties, type ComponentType } from 'react';
 import * as React from 'react';
-import { useMeasure } from 'react-use';
 
 import { type GrafanaTheme2 } from '@grafana/data';
 import { selectors } from '@grafana/e2e-selectors';
-import { type LegendPlacement } from '@grafana/schema';
 
-import { useStyles2, useTheme2 } from '../../themes/ThemeContext';
+import { useStyles2 } from '../../themes/ThemeContext';
 import { getFocusStyles } from '../../themes/mixins';
 import { ScrollContainer } from '../ScrollContainer/ScrollContainer';
+
+import { type VizLayoutLegendLayoutProps } from './types';
+import { useVizLayoutLegend } from './useVizLayoutLegend';
 
 /**
  * @beta
@@ -17,7 +18,8 @@ import { ScrollContainer } from '../ScrollContainer/ScrollContainer';
 export interface VizLayoutProps {
   width: number;
   height: number;
-  legend?: React.ReactElement<VizLayoutLegendProps> | null;
+  /** A VizLayout.Legend, or a legend component that takes the same layout props */
+  legend?: React.ReactElement<VizLayoutLegendLayoutProps> | null;
   children: (width: number, height: number) => React.ReactNode;
 }
 
@@ -34,16 +36,15 @@ export interface VizLayoutComponentType extends FC<VizLayoutProps> {
  * https://developers.grafana.com/ui/latest/index.html?path=/docs/plugins-vizlayout--docs
  */
 export const VizLayout: VizLayoutComponentType = ({ width, height, legend, children }) => {
-  const theme = useTheme2();
   const styles = useStyles2(getVizStyles);
+  const { legendRef, layout } = useVizLayoutLegend(legend?.props, width, height);
   const containerStyle: CSSProperties = {
     display: 'flex',
     width: `${width}px`,
     height: `${height}px`,
   };
-  const [legendRef, legendMeasure] = useMeasure<HTMLDivElement>();
 
-  if (!legend) {
+  if (!layout) {
     return (
       <>
         <div style={containerStyle} className={styles.viz} data-testid={selectors.components.VizLayout.container}>
@@ -53,62 +54,11 @@ export const VizLayout: VizLayoutComponentType = ({ width, height, legend, child
     );
   }
 
-  let { placement, maxHeight = '35%', maxWidth = '60%' } = legend.props;
-
-  if (document.body.clientWidth < theme.breakpoints.values.lg) {
-    placement = 'bottom';
-  }
-
-  let size: VizSize | null = null;
-
-  const legendStyle: CSSProperties = {};
-
-  switch (placement) {
-    case 'bottom':
-      containerStyle.flexDirection = 'column';
-      legendStyle.maxHeight = maxHeight;
-
-      if (legendMeasure.height) {
-        size = { width, height: height - legendMeasure.height };
-      }
-      break;
-    case 'right':
-      containerStyle.flexDirection = 'row';
-
-      if (legendMeasure.width) {
-        size = { width: width - legendMeasure.width, height };
-      }
-
-      if (typeof legend.props.width === 'string') {
-        legendStyle.width = legend.props.width;
-        break;
-      }
-
-      legendStyle.maxWidth = maxWidth;
-
-      if (legend.props.width != null) {
-        legendStyle.width = legend.props.width;
-
-        if (!legendMeasure.width) {
-          size = { width: width - legend.props.width, height };
-        }
-      }
-      break;
-  }
-
-  // This happens when position is switched from bottom to right
-  // Then we preserve old with for one render cycle until legend is measured in it's new position
-  if (size?.width === 0) {
-    size.width = width;
-  }
-
-  if (size?.height === 0) {
-    size.height = height;
-  }
+  const { placement, flexDirection, legendStyle, vizSize } = layout;
 
   return (
-    <div style={containerStyle} data-testid={selectors.components.VizLayout.container}>
-      <div className={styles.viz}>{size && children(size.width, size.height)}</div>
+    <div style={{ ...containerStyle, flexDirection }} data-testid={selectors.components.VizLayout.container}>
+      <div className={styles.viz}>{vizSize && children(vizSize.width, vizSize.height)}</div>
       <div style={legendStyle} ref={legendRef} data-testid={selectors.components.VizLayout.legend}>
         {/* a right-placed legend spans the full panel height, but the scroll container
             sizes to its content by default, so percentage heights inside the legend
@@ -131,20 +81,12 @@ const getVizStyles = (theme: GrafanaTheme2) => {
     }),
   };
 };
-interface VizSize {
-  width: number;
-  height: number;
-}
 
 /**
  * @beta
  */
-export interface VizLayoutLegendProps {
-  placement: LegendPlacement;
+export interface VizLayoutLegendProps extends VizLayoutLegendLayoutProps {
   children: React.ReactNode;
-  maxHeight?: string;
-  maxWidth?: string;
-  width?: number | string;
 }
 
 /**

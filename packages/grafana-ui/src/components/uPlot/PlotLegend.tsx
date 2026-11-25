@@ -18,7 +18,8 @@ import { Button } from '../Button/Button';
 import { IconButton } from '../IconButton/IconButton';
 import { usePanelContext } from '../PanelChrome';
 import { Toggletip } from '../Toggletip/Toggletip';
-import { VizLayout, type VizLayoutLegendProps } from '../VizLayout/VizLayout';
+import { VizLayout } from '../VizLayout/VizLayout';
+import { type VizLayoutLegendLayoutProps } from '../VizLayout/types';
 import { FacetedLabelsFilter } from '../VizLegend/FacetedLabelsFilter';
 import { VizLegend } from '../VizLegend/VizLegend';
 import { type VizLegendItem } from '../VizLegend/types';
@@ -26,7 +27,7 @@ import { type VizLegendItem } from '../VizLegend/types';
 import { type UPlotConfigBuilder } from './config/UPlotConfigBuilder';
 import { getDisplayValuesForCalcs } from './utils';
 
-interface PlotLegendProps extends VizLegendOptions, Omit<VizLayoutLegendProps, 'children'> {
+interface PlotLegendProps extends VizLegendOptions, VizLayoutLegendLayoutProps {
   data: DataFrame[];
   config: UPlotConfigBuilder;
   enableFacetedFilter?: boolean;
@@ -64,10 +65,15 @@ export const PlotLegend = memo(function PlotLegend({
   calcs,
   displayMode,
   limit,
+  sortBy,
+  sortDesc,
+  overflow,
+  width,
+  maxHeight,
+  maxWidth,
   enableFacetedFilter = false,
   facetedFilterPinned = false,
   onPinnedToSidebarChange,
-  ...vizLayoutLegendProps
 }: PlotLegendProps) {
   const theme = useTheme2();
   const styles = useStyles2(getPlotLegendStyles);
@@ -199,18 +205,20 @@ export const PlotLegend = memo(function PlotLegend({
       placement={placement}
       items={legendItems}
       displayMode={displayMode}
-      sortBy={vizLayoutLegendProps.sortBy}
-      sortDesc={vizLayoutLegendProps.sortDesc}
+      sortBy={sortBy}
+      sortDesc={sortDesc}
       isSortable={true}
       limit={limit}
       filterAction={!facetedFilterPinned ? filterToggle : undefined}
-      overflow={vizLayoutLegendProps.overflow}
+      overflow={overflow}
     />
   );
 
+  const layoutProps: VizLayoutLegendLayoutProps = { placement, width, maxHeight, maxWidth };
+
   if (facetedFilterPinned && facetedFilter) {
     return (
-      <VizLayout.Legend placement={placement} {...vizLayoutLegendProps}>
+      <VizLayout.Legend {...layoutProps}>
         <div className={styles.legendWithFilter}>
           <div className={styles.filterContent}>
             <div className={styles.filterDockedActions}>
@@ -237,11 +245,7 @@ export const PlotLegend = memo(function PlotLegend({
     );
   }
 
-  return (
-    <VizLayout.Legend placement={placement} {...vizLayoutLegendProps}>
-      {legend}
-    </VizLayout.Legend>
-  );
+  return <VizLayout.Legend {...layoutProps}>{legend}</VizLayout.Legend>;
 });
 
 PlotLegend.displayName = 'PlotLegend';
