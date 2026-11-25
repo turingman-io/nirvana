@@ -5,7 +5,6 @@ import {
   FALLBACK_COLOR,
   type Field,
   FieldType,
-  formattedValueToString,
   getFieldColorModeForField,
   type GrafanaTheme2,
   MappingType,
@@ -14,16 +13,18 @@ import {
   colorManipulator,
 } from '@grafana/data';
 import { t } from '@grafana/i18n';
-import { AxisPlacement, FieldColorModeId, ScaleDirection, ScaleOrientation, VisibilityMode } from '@grafana/schema';
+import { FieldColorModeId, VisibilityMode } from '@grafana/schema';
 import { UPlotConfigBuilder } from '@grafana/ui';
 import { type FacetedData, type FacetSeries } from '@grafana/ui/internal';
 
 import { pointWithin, Quadtree, type Rect } from '../barchart/quadtree';
 import { valuesToFills } from '../heatmap/utils';
 
+import { addXAxis, addYAxis } from './axes';
 import { PointShape } from './panelcfg.gen';
+import { getPointDiameters } from './pointSize';
 import { type XYSeries } from './types2';
-import { getCommonPrefixSuffix } from './utils';
+import { getValueRange } from './utils';
 
 interface DrawBubblesOpts {
   each: (u: uPlot, seriesIdx: number, dataIdx: number, lft: number, top: number, wid: number, hgt: number) => void;
@@ -299,60 +300,7 @@ export const prepConfig = (xySeries: XYSeries[], theme: GrafanaTheme2) => {
 
   builder.setMode(2);
 
-  let xField = xySeries[0].x.field;
-  let xIsTime = xField.type === FieldType.time;
-
-  let fieldConfig = xField.config;
-  let customConfig = fieldConfig.custom;
-  let scaleDistr = customConfig?.scaleDistribution;
-
-  builder.addScale({
-    scaleKey: 'x',
-    isTime: xIsTime,
-    auto: true,
-    orientation: ScaleOrientation.Horizontal,
-    direction: ScaleDirection.Right,
-    distribution: scaleDistr?.type,
-    log: scaleDistr?.log,
-    linearThreshold: scaleDistr?.linearThreshold,
-    min: fieldConfig.min,
-    max: fieldConfig.max,
-    softMin: customConfig?.axisSoftMin,
-    softMax: customConfig?.axisSoftMax,
-    centeredZero: customConfig?.axisCenteredZero,
-    decimals: fieldConfig.decimals,
-    range: xIsTime ? (u, min, max) => [min, max] : undefined,
-  });
-
-  // why does this fall back to '' instead of null or undef?
-  let xAxisLabel = customConfig.axisLabel;
-
-  if (xAxisLabel == null || xAxisLabel === '') {
-    let dispNames = xySeries.map((s) => s.x.field.state?.displayName ?? '');
-
-    let xAxisAutoLabel =
-      xySeries.length === 1
-        ? (xField.state?.displayName ?? xField.name)
-        : new Set(dispNames).size === 1
-          ? dispNames[0]
-          : getCommonPrefixSuffix(dispNames);
-
-    if (xAxisAutoLabel !== '') {
-      xAxisLabel = xAxisAutoLabel;
-    }
-  }
-
-  builder.addAxis({
-    scaleKey: 'x',
-    isTime: xIsTime,
-    placement: customConfig?.axisPlacement !== AxisPlacement.Hidden ? AxisPlacement.Bottom : AxisPlacement.Hidden,
-    show: customConfig?.axisPlacement !== AxisPlacement.Hidden,
-    grid: { show: customConfig?.axisGridShow },
-    border: { show: customConfig?.axisBorderShow },
-    theme,
-    label: xAxisLabel,
-    formatValue: xIsTime ? undefined : (v, decimals) => formattedValueToString(xField.display!(v, decimals)),
-  });
+  addXAxis(builder, xySeries, theme);
 
   xySeries.forEach((s, si) => {
     let field = s.y.field;
@@ -362,56 +310,7 @@ export const prepConfig = (xySeries: XYSeries[], theme: GrafanaTheme2) => {
     //const lineColor = s.lineColor(frame);
     //const lineWidth = s.lineWidth;
 
-    let scaleKey = field.config.unit ?? 'y';
-    let config = field.config;
-    let customConfig = config.custom;
-    let scaleDistr = customConfig?.scaleDistribution;
-
-    builder.addScale({
-      scaleKey,
-      orientation: ScaleOrientation.Vertical,
-      direction: ScaleDirection.Up,
-      distribution: scaleDistr?.type,
-      log: scaleDistr?.log,
-      linearThreshold: scaleDistr?.linearThreshold,
-      min: config.min,
-      max: config.max,
-      softMin: customConfig?.axisSoftMin,
-      softMax: customConfig?.axisSoftMax,
-      centeredZero: customConfig?.axisCenteredZero,
-      decimals: config.decimals,
-    });
-
-    // why does this fall back to '' instead of null or undef?
-    let yAxisLabel = customConfig.axisLabel;
-
-    if (yAxisLabel == null || yAxisLabel === '') {
-      let dispNames = xySeries.map((s) => s.y.field.state?.displayName ?? '');
-
-      let yAxisAutoLabel =
-        xySeries.length === 1
-          ? (field.state?.displayName ?? field.name)
-          : new Set(dispNames).size === 1
-            ? dispNames[0]
-            : getCommonPrefixSuffix(dispNames);
-
-      if (yAxisAutoLabel !== '') {
-        yAxisLabel = yAxisAutoLabel;
-      }
-    }
-
-    builder.addAxis({
-      scaleKey,
-      theme,
-      placement: customConfig?.axisPlacement === AxisPlacement.Auto ? AxisPlacement.Left : customConfig?.axisPlacement,
-      show: customConfig?.axisPlacement !== AxisPlacement.Hidden,
-      grid: { show: customConfig?.axisGridShow },
-      border: { show: customConfig?.axisBorderShow },
-      size: customConfig?.axisWidth,
-      // label: yAxisLabel == null || yAxisLabel === '' ? fieldDisplayName : yAxisLabel,
-      label: yAxisLabel,
-      formatValue: (v, decimals) => formattedValueToString(field.display!(v, decimals)),
-    });
+    let scaleKey = addYAxis(builder, s, xySeries, theme);
 
     builder.addSeries({
       facets: [
@@ -458,7 +357,8 @@ export const prepConfig = (xySeries: XYSeries[], theme: GrafanaTheme2) => {
     //   return [null];
     // }
 
-    const { size: sizeRange, color: colorRange } = getGlobalRanges(xySeries);
+    const sizeRange = getValueRange(xySeries.map((s) => s.size.field));
+    const colorRange = getValueRange(xySeries.map((s) => s.color.field));
 
     xySeries.forEach((s, i) => {
       dispColors[i].values = dispColors[i].getAll(s.color.field?.values ?? [], colorRange.min, colorRange.max);
@@ -469,43 +369,10 @@ export const prepConfig = (xySeries: XYSeries[], theme: GrafanaTheme2) => {
       ...xySeries.map((s, idx) => {
         let len = s.x.field.values.length;
 
-        let diams: number[];
-
-        if (s.size.field != null) {
-          let { min, max } = s.size;
-
-          // todo: this scaling should be in renderer from raw values (not by passing css pixel diams via data)
-          let minPx = min! ** 2;
-          let maxPx = max! ** 2;
-          // use quadratic size scaling in byValue modes
-          let pxRange = maxPx - minPx;
-
-          let vals = s.size.field.values;
-          let minVal = sizeRange.min;
-          let maxVal = sizeRange.max;
-          let valRange = maxVal - minVal;
-
-          if (valRange === 0) {
-            diams = Array(len).fill(s.y.field.config.custom.pointSize.fixed);
-          } else {
-            diams = Array(len);
-
-            for (let i = 0; i < vals.length; i++) {
-              let val = vals[i];
-
-              let valPct = (val - minVal) / valRange;
-              let pxArea = minPx + valPct * pxRange;
-              diams[i] = pxArea ** 0.5;
-            }
-          }
-        } else {
-          diams = Array(len).fill(s.size.fixed!);
-        }
-
         return [
           s.x.field.values, // X
           s.y.field.values, // Y
-          diams,
+          getPointDiameters(s, sizeRange),
           Array(len).fill(s.color.fixed!), // TODO: fails for by value
         ];
       }),
@@ -516,45 +383,6 @@ export const prepConfig = (xySeries: XYSeries[], theme: GrafanaTheme2) => {
 };
 
 export type PrepData = (xySeries: XYSeries[]) => FacetedData;
-
-const getGlobalRanges = (xySeries: XYSeries[]) => {
-  const ranges = {
-    size: {
-      min: Infinity,
-      max: -Infinity,
-    },
-    color: {
-      min: Infinity,
-      max: -Infinity,
-    },
-  };
-
-  xySeries.forEach((series) => {
-    [series.size, series.color].forEach((facet, fi) => {
-      if (facet.field != null) {
-        let range = fi === 0 ? ranges.size : ranges.color;
-
-        const vals = facet.field.values;
-
-        for (let i = 0; i < vals.length; i++) {
-          const v = vals[i];
-
-          if (v != null) {
-            if (v < range.min) {
-              range.min = v;
-            }
-
-            if (v > range.max) {
-              range.max = v;
-            }
-          }
-        }
-      }
-    });
-  });
-
-  return ranges;
-};
 
 function getHex8Color(color: string, theme: GrafanaTheme2) {
   return tinycolor(theme.visualization.getColorByName(color)).toHex8String();

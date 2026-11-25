@@ -86,6 +86,12 @@ export interface XYSeries {
   _rest: Field[];
 }
 
+// min/max of a mapped dimension (size, color) across all series
+export interface ValueRange {
+  min: number;
+  max: number;
+}
+
 // export interface Options extends common.OptionsWithLegend, common.OptionsWithTooltip {
 //   // source: 'annotations' | 'series', // maybe render directly from annotations (exemplars)
 //   mapping: SeriesMapping;

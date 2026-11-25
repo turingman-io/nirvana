@@ -11,7 +11,7 @@ import {
 } from '@grafana/data';
 
 import { PointShape, SeriesMapping, XYShowMode } from './panelcfg.gen';
-import { fmt, getCommonPrefixSuffix, prepSeries } from './utils';
+import { fmt, getCommonPrefixSuffix, getValueRange, prepSeries } from './utils';
 
 jest.mock('@grafana/runtime', () => ({
   ...jest.requireActual('@grafana/runtime'),
@@ -74,6 +74,21 @@ describe('fmt', () => {
       config: {},
     };
     expect(fmt(field, 42)).toBe('42');
+  });
+});
+
+describe('getValueRange', () => {
+  it('returns the min and max of all fields, skipping nulls and unmapped fields', () => {
+    const [a, b] = makeFrame([
+      { name: 'a', values: [3, null, 7] },
+      { name: 'b', values: [-2, 5, null] },
+    ]).fields;
+
+    expect(getValueRange([a, undefined, b])).toEqual({ min: -2, max: 7 });
+  });
+
+  it('returns an empty range when there are no values', () => {
+    expect(getValueRange([undefined])).toEqual({ min: Infinity, max: -Infinity });
   });
 });
 
@@ -209,6 +224,24 @@ describe('prepSeries', () => {
       expect(result[0].size.field!.name).toBe('sizeField');
       expect(result[0].size.min).toBe(2);
       expect(result[0].size.max).toBe(50);
+    });
+
+    it('falls back to the default min/max size when the size field has no point size config', () => {
+      const frame = makeFrame([
+        { name: 'x', values: [1, 2] },
+        { name: 'y', values: [10, 20] },
+        { name: 'sizeField', values: [5, 15], config: { custom: { pointSize: undefined } } },
+      ]);
+
+      const result = prepSeries(
+        SeriesMapping.Auto,
+        [{ size: { matcher: { id: 'byName', options: 'sizeField' } } }],
+        [frame],
+        fieldConfig
+      );
+
+      expect(result[0].size.min).toBe(5);
+      expect(result[0].size.max).toBe(100);
     });
 
     it('assigns fixed size from field config when no size field', () => {
