@@ -31,7 +31,7 @@ import { convertSpecToWireFormat } from '../serialization/transformationCompat';
 
 import { type SaveDashboardDrawer } from './SaveDashboardDrawer';
 import { SaveDashboardFormCommonOptions } from './SaveDashboardForm';
-import { type DashboardChangeInfo } from './shared';
+import { type DashboardChangeInfo, SaveFormCancelButton } from './shared';
 
 export interface Props {
   dashboard: DashboardScene;
@@ -203,9 +203,7 @@ export function SaveProvisionedDashboardForm({ dashboard, drawer, changeInfo }: 
                 Copy JSON to clipboard
               </Trans>
             </ClipboardButton>
-            <Button variant="secondary" onClick={drawer.onClose} fill="outline">
-              <Trans i18nKey="dashboard-scene.save-provisioned-dashboard-form.cancel">Cancel</Trans>
-            </Button>
+            <SaveFormCancelButton drawer={drawer} />
           </Stack>
         </Box>
       </Stack>

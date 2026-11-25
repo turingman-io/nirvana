@@ -1,17 +1,19 @@
 import { css } from '@emotion/css';
+import { type ReactNode } from 'react';
 
 import { type GrafanaTheme2 } from '@grafana/data';
 import { selectors } from '@grafana/e2e-selectors';
 import { Trans, t } from '@grafana/i18n';
 import { type Dashboard } from '@grafana/schema';
 import { type Spec as DashboardV2Spec } from '@grafana/schema/apis/dashboard.grafana.app/v2';
-import { Alert, Button, useStyles2 } from '@grafana/ui';
+import { Alert, Box, Button, Stack, useStyles2 } from '@grafana/ui';
 import { AnnoKeyManagerIdentity, AnnoKeyManagerKind, AnnoKeySourcePath } from 'app/features/apiserver/types';
 import { type DashboardMeta } from 'app/types/dashboard';
 
 import { type DashboardSceneState } from '../scene/types/dashboard';
 import { type Diffs } from '../settings/version-history/utils';
 
+import { type SaveDashboardDrawer } from './SaveDashboardDrawer';
 import { type SaveDashboardErrorInfo } from './saveErrors';
 
 export interface DashboardChangeInfo {
@@ -173,5 +175,69 @@ export function SaveButton({ overwrite, isLoading, isValid, onSave, disabled = f
           ? t('dashboard-scene.save-button.save-and-overwrite', 'Save and overwrite')
           : t('dashboard-scene.save-button.save', 'Save')}
     </Button>
+  );
+}
+
+export function SaveFormCancelButton({ drawer }: { drawer: SaveDashboardDrawer }) {
+  return (
+    <Button variant="secondary" onClick={drawer.onClose} fill="outline">
+      <Trans i18nKey="dashboard-scene.save-dashboard-form.cancel-button.cancel">Cancel</Trans>
+    </Button>
+  );
+}
+
+interface SaveFormActionsProps {
+  drawer: SaveDashboardDrawer;
+  saveButton: ReactNode;
+  /** Further actions, offered between Save and Cancel */
+  children?: ReactNode;
+  /** Notes next to the buttons that there is nothing to save */
+  showNoChanges?: boolean;
+}
+
+/** The row of actions a save form ends with */
+export function SaveFormActions({ drawer, saveButton, children, showNoChanges = false }: SaveFormActionsProps) {
+  return (
+    <Stack alignItems="center">
+      {saveButton}
+      {children}
+      <SaveFormCancelButton drawer={drawer} />
+      {showNoChanges && (
+        <div>
+          <Trans i18nKey="dashboard-scene.save-dashboard-form.render-footer.no-changes-to-save">
+            No changes to save
+          </Trans>
+        </div>
+      )}
+    </Stack>
+  );
+}
+
+interface SaveConflictAlertProps {
+  /** What the server said about the conflict, if anything */
+  message?: string;
+  /** The actions offered instead of the footer's, usually SaveFormActions with an overwriting Save */
+  children: ReactNode;
+}
+
+/** Someone saved the dashboard after this edit started, so saving now overwrites their save */
+export function SaveConflictAlert({ message, children }: SaveConflictAlertProps) {
+  return (
+    <Alert
+      title={t(
+        'dashboard-scene.save-dashboard-form.render-footer.title-someone-else-has-updated-this-dashboard',
+        'Someone else has updated this dashboard'
+      )}
+      severity="error"
+    >
+      <p>
+        <Trans i18nKey="dashboard-scene.save-dashboard-form.render-footer.would-still-dashboard">
+          Would you still like to save this dashboard?
+        </Trans>
+      </p>
+      {/* Bare text: a <p> here would stack its bottom margin onto the Box padding below. */}
+      {message}
+      <Box paddingTop={2}>{children}</Box>
+    </Alert>
   );
 }

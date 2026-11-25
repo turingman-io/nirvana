@@ -3,7 +3,7 @@ import { type UseFormSetValue, useForm } from 'react-hook-form';
 
 import { selectors } from '@grafana/e2e-selectors';
 import { Trans, t } from '@grafana/i18n';
-import { Button, Input, Switch, Field, Label, TextArea, Stack, Box } from '@grafana/ui';
+import { Input, Field, Label, TextArea, Stack, Box } from '@grafana/ui';
 import { FolderPicker } from 'app/core/components/Select/FolderPicker';
 import { AnnoKeyUseCrossDashboardVariables } from 'app/features/apiserver/types';
 import { validationSrv } from 'app/features/manage-dashboards/services/ValidationSrv';
@@ -12,24 +12,19 @@ import { type DashboardScene } from '../scene/DashboardScene';
 
 import { FolderDescription } from './FolderDescription';
 import { type SaveDashboardDrawer } from './SaveDashboardDrawer';
+import { CopyTagsField } from './SaveFormFields';
 import { getSaveDashboardErrorInfo } from './saveErrors';
+import { type SaveDashboardAsFormDTO, getSaveAsFormDefaults } from './saveFormDefaults';
 import {
   type DashboardChangeInfo,
   NameAlreadyExistsError,
   SaveButton,
   SaveDashboardErrorAlert,
+  SaveFormActions,
   nextMetaAfterFolderPick,
 } from './shared';
-import { useParkSaveFormDraft } from './useParkSaveFormDraft';
+import { useParkSaveFormDraft, useSaveFormDraft } from './useParkSaveFormDraft';
 import { useSaveDashboard } from './useSaveDashboard';
-
-interface SaveDashboardAsFormDTO {
-  firstName?: string;
-  title: string;
-  description: string;
-  folder: { uid?: string; title?: string };
-  copyTags: boolean;
-}
 
 export interface Props {
   dashboard: DashboardScene;
@@ -42,19 +37,11 @@ export interface Props {
 
 export function SaveDashboardAsForm({ dashboard, changeInfo, drawer, isHeld }: Props) {
   const { changedSaveModel } = changeInfo;
-  const draft = drawer.saveFormDraft;
+  const draft = useSaveFormDraft(drawer);
 
   const { register, handleSubmit, setValue, formState, getValues, watch, trigger } = useForm<SaveDashboardAsFormDTO>({
     mode: 'onBlur',
-    defaultValues: {
-      title: draft?.title ?? (changeInfo.isNew ? changedSaveModel.title! : `${changedSaveModel.title} Copy`),
-      description: draft?.description ?? changedSaveModel.description ?? '',
-      folder: {
-        uid: dashboard.state.meta.folderUid,
-        title: dashboard.state.meta.folderTitle,
-      },
-      copyTags: changeInfo.isNew,
-    },
+    defaultValues: getSaveAsFormDefaults(dashboard, changeInfo, draft),
   });
 
   const { errors, isValid } = formState;
@@ -163,17 +150,10 @@ export function SaveDashboardAsForm({ dashboard, changeInfo, drawer, isHeld }: P
     }
   };
 
-  const cancelButton = (
-    <Button variant="secondary" onClick={drawer.onClose} fill="outline">
-      <Trans i18nKey="dashboard-scene.save-dashboard-as-form.cancel-button.cancel">Cancel</Trans>
-    </Button>
+  const saveButton = (
+    <SaveButton isValid={isValid} isLoading={state.loading} disabled={isHeld} onSave={onSave} overwrite={false} />
   );
 
-  const saveButton = (overwrite: boolean) => {
-    return (
-      <SaveButton isValid={isValid} isLoading={state.loading} disabled={isHeld} onSave={onSave} overwrite={overwrite} />
-    );
-  };
   function renderFooter(error?: Error) {
     const formValuesMatchContentSent =
       formValues.title.trim() === contentSent.title?.trim() && formValues.folder.uid === contentSent.folderUid;
@@ -186,10 +166,7 @@ export function SaveDashboardAsForm({ dashboard, changeInfo, drawer, isHeld }: P
     return (
       <>
         {errorInfo && <SaveDashboardErrorAlert info={errorInfo} />}
-        <Stack alignItems="center">
-          {saveButton(false)}
-          {cancelButton}
-        </Stack>
+        <SaveFormActions drawer={drawer} saveButton={saveButton} />
       </>
     );
   }
@@ -245,11 +222,7 @@ export function SaveDashboardAsForm({ dashboard, changeInfo, drawer, isHeld }: P
           </Field>
           <FolderDescription folderUid={formValues.folder?.uid} />
         </Stack>
-        {!changeInfo.isNew && (
-          <Field noMargin label={t('dashboard-scene.save-dashboard-as-form.label-copy-tags', 'Copy tags')}>
-            <Switch {...register('copyTags')} disabled={state.loading} />
-          </Field>
-        )}
+        {!changeInfo.isNew && <CopyTagsField {...register('copyTags')} disabled={state.loading} />}
         <Box paddingTop={2}>{renderFooter(state.error)}</Box>
       </Stack>
     </form>

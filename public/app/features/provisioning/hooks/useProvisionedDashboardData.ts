@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { type RepositoryView } from 'app/api/clients/provisioning/v0alpha1';
 import { useUrlParams } from 'app/core/navigation/hooks';
 import { AnnoKeyManagerIdentity, AnnoKeySourcePath } from 'app/features/apiserver/types';
+import { getDashboardCopyTitle } from 'app/features/dashboard-scene/saving/saveFormDefaults';
 import { type DashboardScene } from 'app/features/dashboard-scene/scene/DashboardScene';
 import { RepoViewStatus, type RepositoryViewData } from 'app/features/provisioning/hooks/useGetResourceRepositoryView';
 import { getIsReadOnlyRepo } from 'app/features/provisioning/utils/repository';
@@ -153,7 +154,7 @@ export function useProvisionedDashboardData(
   // fresh one per recompute would rewrite that filename
   const [timestamp] = useState(generateTimestamp);
   // The caller's title is whatever the previous form showed, suffix included, so only a fresh copy gets one
-  const defaultTitle = title ?? (saveAsCopy ? `${dashboardTitle} Copy` : dashboardTitle);
+  const defaultTitle = title ?? (saveAsCopy ? getDashboardCopyTitle(dashboardTitle) : dashboardTitle);
   const defaultDescription = description ?? dashboardDescription;
 
   // `view` is rebuilt on every render of the lookup; only these fields feed the defaults. A fresh values

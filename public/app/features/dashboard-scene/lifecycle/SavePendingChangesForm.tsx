@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { useAsyncFn } from 'react-use';
 
 import { Trans, t } from '@grafana/i18n';
-import { Alert, Box, Button, Field, Stack, TextArea } from '@grafana/ui';
+import { Alert, Button, Stack } from '@grafana/ui';
 import { useAppNotification } from 'app/core/copy/appNotification';
 import { getMessageFromError } from 'app/core/utils/errors';
 
 import { type SaveDashboardDrawer } from '../saving/SaveDashboardDrawer';
-import { type DashboardChangeInfo, SaveButton } from '../saving/shared';
+import { MAX_SAVE_MESSAGE_LENGTH, SaveMessageField, SaveMessageLengthAlert } from '../saving/SaveFormFields';
+import { type DashboardChangeInfo, SaveButton, SaveConflictAlert, SaveFormActions } from '../saving/shared';
 import { type DashboardScene } from '../scene/DashboardScene';
 
 import { getScenePendingChangePreview, isPendingChangesStale, previewedDashboardUid } from './pendingChangePreview';
@@ -19,9 +20,6 @@ interface Props {
   drawer: SaveDashboardDrawer;
   changeInfo: DashboardChangeInfo;
 }
-
-/** The version history keeps a message up to this long. */
-const MAX_MESSAGE_LENGTH = 500;
 
 /**
  * The save form for pending changes to a saved dashboard: Save saves them through the plugin that
@@ -61,7 +59,7 @@ export function SavePendingChangesForm({ dashboard, drawer, changeInfo }: Props)
   );
 
   const messageLength = message.length;
-  const messageTooLong = messageLength > MAX_MESSAGE_LENGTH;
+  const messageTooLong = messageLength > MAX_SAVE_MESSAGE_LENGTH;
   // An edit not recorded yet isn't in the changes shown, but Save records it first.
   const unrecorded = dashboard.hasUnrecordedEdits() || hasUnrecordedPendingChange(dashboard);
   const saveButton = (overwrite: boolean) => (
@@ -72,86 +70,39 @@ export function SavePendingChangesForm({ dashboard, drawer, changeInfo }: Props)
       overwrite={overwrite}
     />
   );
-  const cancelButton = (
-    <Button variant="secondary" onClick={drawer.onClose} fill="outline">
-      <Trans i18nKey="dashboard-scene.save-dashboard-form.cancel-button.cancel">Cancel</Trans>
-    </Button>
-  );
   const update = preview?.pending.update;
 
   return (
     <Stack gap={2} direction="column">
-      <Field label={t('dashboard-scene.save-dashboard-form.label-message', 'Message')} noMargin>
-        <TextArea
-          aria-label={t('dashboard-scene.save-dashboard-form.aria-label-message', 'message')}
-          value={message}
-          onChange={(e) => setMessage(e.currentTarget.value)}
-          placeholder={t(
-            'dashboard-scene.save-dashboard-form.placeholder-describe-changes-optional',
-            'Add a note to describe your changes (optional).'
-          )}
-          autoFocus
-          rows={5}
-        />
-      </Field>
-      {messageTooLong && (
-        <Alert title={t('save-dashboards.message-length.title', 'Message too long')} severity="error">
-          <p>
-            <Trans i18nKey="save-dashboards.message-length.info">
-              The message is {{ messageLength }} characters, which exceeds the maximum length of 500 characters. Please
-              shorten it before saving.
-            </Trans>
-          </p>
-        </Alert>
-      )}
+      <SaveMessageField value={message} onChange={setMessage} />
+      {messageTooLong && <SaveMessageLengthAlert messageLength={messageLength} />}
       {state.error && (
         <Alert title={t('dashboard-scene.lifecycle.save-failed', "Couldn't save the changes")} severity="error">
           {getMessageFromError(state.error)}
         </Alert>
       )}
       {stale ? (
-        <Alert
-          title={t(
-            'dashboard-scene.save-dashboard-form.render-footer.title-someone-else-has-updated-this-dashboard',
-            'Someone else has updated this dashboard'
-          )}
-          severity="error"
-        >
-          <p>
-            <Trans i18nKey="dashboard-scene.save-dashboard-form.render-footer.would-still-dashboard">
-              Would you still like to save this dashboard?
-            </Trans>
-          </p>
-          <Box paddingTop={2}>
-            <Stack alignItems="center">
-              {saveButton(true)}
-              {update && (
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    drawer.onClose();
-                    update();
-                  }}
-                >
-                  <Trans i18nKey="dashboard-scene.lifecycle.ask-assistant-to-update">Ask Assistant to update</Trans>
-                </Button>
-              )}
-              {cancelButton}
-            </Stack>
-          </Box>
-        </Alert>
+        <SaveConflictAlert>
+          <SaveFormActions drawer={drawer} saveButton={saveButton(true)}>
+            {update && (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  drawer.onClose();
+                  update();
+                }}
+              >
+                <Trans i18nKey="dashboard-scene.lifecycle.ask-assistant-to-update">Ask Assistant to update</Trans>
+              </Button>
+            )}
+          </SaveFormActions>
+        </SaveConflictAlert>
       ) : (
-        <Stack alignItems="center">
-          {saveButton(false)}
-          {cancelButton}
-          {!changeInfo.hasChanges && !unrecorded && (
-            <div>
-              <Trans i18nKey="dashboard-scene.save-dashboard-form.render-footer.no-changes-to-save">
-                No changes to save
-              </Trans>
-            </div>
-          )}
-        </Stack>
+        <SaveFormActions
+          drawer={drawer}
+          saveButton={saveButton(false)}
+          showNoChanges={!changeInfo.hasChanges && !unrecorded}
+        />
       )}
     </Stack>
   );
