@@ -130,6 +130,17 @@ describe('StateTimelinePanel', () => {
     expect(screen.getByTestId('state-timeline-tooltip-plugin')).toBeInTheDocument();
   });
 
+  it('shows how long the hovered state lasts in the tooltip', () => {
+    renderStateTimelinePanel({
+      legend: { ...baseOptions.legend, showLegend: false },
+      tooltip: { ...baseOptions.tooltip, mode: TooltipDisplayMode.Single },
+    });
+
+    // the first state ('ok' at 1000) lasts until 'warn' starts at 2000
+    expect(screen.getByText('Duration')).toBeInTheDocument();
+    expect(screen.getByText('1s')).toBeInTheDocument();
+  });
+
   it('does not render TooltipPlugin2 when tooltip mode is None', () => {
     renderStateTimelinePanel({
       legend: { ...baseOptions.legend, showLegend: false },

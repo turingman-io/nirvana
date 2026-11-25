@@ -4,7 +4,7 @@ import { getDefaultTimeRange, createTheme } from '@grafana/data';
 import { VisibilityMode } from '@grafana/schema';
 
 import { getConfig, type TimelineCoreOptions, shouldDrawYValue } from './timeline';
-import { TimelineMode } from './utils';
+import { TimelineMode } from './types';
 
 jest.mock('uplot');
 

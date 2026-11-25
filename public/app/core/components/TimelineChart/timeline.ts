@@ -8,7 +8,7 @@ import { Quadtree, type Rect } from 'app/plugins/panel/barchart/quadtree';
 import { type FieldConfig as StateTimeLineFieldConfig } from 'app/plugins/panel/state-timeline/panelcfg.gen';
 import { type FieldConfig as StatusHistoryFieldConfig } from 'app/plugins/panel/status-history/panelcfg.gen';
 
-import { TimelineMode } from './utils';
+import { TimelineMode } from './types';
 
 const { round, min, ceil } = Math;
 

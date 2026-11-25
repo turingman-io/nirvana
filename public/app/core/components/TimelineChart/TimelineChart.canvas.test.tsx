@@ -18,8 +18,9 @@ import { applyDefaultUPlotAxisMeasureTextMock, removeCanvasTransforms } from '@g
 import { measureText as uPlotAxisMeasureText, type UPlotConfigBuilder } from '@grafana/ui';
 
 import { TimelineChart } from './TimelineChart';
+import { TimelineMode } from './types';
 import * as timelineChartUtils from './utils';
-import { prepareTimelineFields, TimelineMode } from './utils';
+import { prepareTimelineFields } from './utils';
 
 // jest-canvas-mock reports `TextMetrics.width === text.length`, which throws off uPlot axis
 // layout vs. the browser. Route @grafana/ui's measureText through the deterministic mock and

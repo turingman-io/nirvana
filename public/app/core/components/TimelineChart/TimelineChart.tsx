@@ -13,7 +13,8 @@ import { shouldShowLegend } from '@grafana/ui/internal';
 import { GraphNG, type GraphNGProps } from '../GraphNG/GraphNG';
 import { getXAxisConfig } from '../TimeSeries/utils';
 
-import { preparePlotConfigBuilder, type TimelineMode } from './utils';
+import { type TimelineMode } from './types';
+import { preparePlotConfigBuilder } from './utils';
 
 export interface TimelineProps extends Omit<GraphNGProps, 'prepConfig' | 'propsToDiff' | 'renderLegend'> {
   mode: TimelineMode;

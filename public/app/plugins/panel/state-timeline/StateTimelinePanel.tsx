@@ -13,11 +13,8 @@ import {
 } from '@grafana/ui';
 import { type TimeRange2, TooltipHoverMode } from '@grafana/ui/internal';
 import { TimelineChart } from 'app/core/components/TimelineChart/TimelineChart';
-import {
-  prepareTimelineFields,
-  prepareTimelineLegendItems,
-  TimelineMode,
-} from 'app/core/components/TimelineChart/utils';
+import { TimelineMode } from 'app/core/components/TimelineChart/types';
+import { prepareTimelineFields, prepareTimelineLegendItems } from 'app/core/components/TimelineChart/utils';
 import { getFilterByGroupedLabels } from 'app/features/panel/filters/adhoc';
 
 import { AnnotationsPlugin } from '../timeseries/plugins/AnnotationsPlugin';
