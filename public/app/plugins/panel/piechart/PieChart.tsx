@@ -30,8 +30,9 @@ import {
 } from '@grafana/ui';
 import { getTooltipContainerStyles, useComponentInstanceId } from '@grafana/ui/internal';
 
+import { getSliceColor } from './PieChartGradient';
 import { PieChartType, PieChartLabels } from './panelcfg.gen';
-import { filterDisplayItems, sumDisplayItemsReducer } from './utils';
+import { filterDisplayItems, formatPercentOfTotal, sumDisplayItemsReducer } from './utils';
 
 /**
  * @beta
@@ -134,9 +135,7 @@ export const PieChart = ({
                   // fall back to the per-series radial gradient (existing behaviour).
                   // Items with a field-level color override are not in gradientFills —
                   // fall back to display.color (the override value) rather than FALLBACK_COLOR.
-                  const fill = gradientFills
-                    ? (gradientFills.get(arc.data) ?? arc.data.display.color ?? FALLBACK_COLOR)
-                    : getGradientColor(color);
+                  const fill = gradientFills ? getSliceColor(arc.data, gradientFills) : getGradientColor(color);
 
                   // Slice with no data links — render plain, no keyboard interaction.
                   if (!arc.data.hasLinks || !arc.data.getLinks) {
@@ -399,7 +398,7 @@ function PieLabel({ arc, outerRadius, innerRadius, displayLabels, total, color, 
         )}
         {displayLabels.includes(PieChartLabels.Percent) && (
           <tspan x={labelX} dy="1.2em">
-            {((arc.data.display.numeric / total) * 100).toFixed(arc.data.field.decimals ?? 0) + '%'}
+            {formatPercentOfTotal(arc.data, total)}
           </tspan>
         )}
       </text>
@@ -425,7 +424,7 @@ function getTooltipData(
       })
       .map((pieArc) => {
         return {
-          color: gradientFills?.get(pieArc.data) ?? pieArc.data.display.color ?? FALLBACK_COLOR,
+          color: getSliceColor(pieArc.data, gradientFills),
           label: pieArc.data.display.title,
           value: formattedValueToString(pieArc.data.display),
           isActive: pieArc.index === arc.index,
@@ -434,7 +433,7 @@ function getTooltipData(
   }
   return [
     {
-      color: gradientFills?.get(arc.data) ?? arc.data.display.color ?? FALLBACK_COLOR,
+      color: getSliceColor(arc.data, gradientFills),
       label: arc.data.display.title,
       value: formattedValueToString(arc.data.display),
     },
@@ -445,47 +444,6 @@ function getLabelPos(arc: PieArcDatum<FieldDisplay>, outerRadius: number, innerR
   const r = (outerRadius + innerRadius) / 2;
   const a = (+arc.startAngle + +arc.endAngle) / 2 - Math.PI / 2;
   return [Math.cos(a) * r, Math.sin(a) * r];
-}
-
-/**
- * Compute a flat hex fill color for each slice when the "gradient" color scheme is active.
- *
- * Slices are ranked by their numeric value from largest (rank 0) to smallest
- * (rank N-1). The interpolation parameter t = rank / (N-1) linearly maps that
- * rank onto the [colorFrom, colorTo] range in RGB space:
- *   - largest slice  → colorFrom (t = 0)
- *   - smallest slice → colorTo   (t = 1)
- *   - intermediate   → RGB lerp between the two
- *
- * When there is only one slice it receives colorFrom exactly.
- * Duplicate values retain their relative order (stable sort).
- *
- * @returns A Map keyed by the `FieldDisplay` object reference → hex color string.
- *   Using the object reference as the key (instead of display.title) guarantees
- *   uniqueness even when multiple series share the same display name.
- */
-export function computeGradientFills(
-  items: FieldDisplay[],
-  colorFrom: string,
-  colorTo: string
-): Map<FieldDisplay, string> {
-  // Sort a copy by value descending to determine rank; original order is unchanged.
-  const sorted = [...items].sort((a, b) => b.display.numeric - a.display.numeric);
-  const n = sorted.length;
-  const from = tinycolor(colorFrom).toRgb();
-  const to = tinycolor(colorTo).toRgb();
-  const fills = new Map<FieldDisplay, string>();
-
-  for (let rank = 0; rank < n; rank++) {
-    const item = sorted[rank];
-    const t = n > 1 ? rank / (n - 1) : 0;
-    const r = Math.round(from.r * (1 - t) + to.r * t);
-    const g = Math.round(from.g * (1 - t) + to.g * t);
-    const b = Math.round(from.b * (1 - t) + to.b * t);
-    fills.set(item, tinycolor({ r, g, b }).toHexString());
-  }
-
-  return fills;
 }
 
 function getGradientColorFrom(color: string, theme: GrafanaTheme2) {
