@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react';
+import { memo } from 'react';
 import { connect, type ConnectedProps } from 'react-redux';
 
 import { type DataFrame, type SplitOpen } from '@grafana/data';
@@ -7,7 +7,7 @@ import { type AdHocFilterItem } from '@grafana/ui';
 import { type ExploreItemState } from 'app/types/explore';
 import { type StoreState } from 'app/types/store';
 
-import { exploreDataLinkPostProcessorFactory } from '../utils/links';
+import { useExploreDataLinkPostProcessor } from '../hooks/useExploreDataLinkPostProcessor';
 
 import { PrometheusQueryResultsContainer } from './PrometheusQueryResultsContainer';
 
@@ -55,10 +55,7 @@ const ExploreRawPrometheusContainer = memo(
     range,
     splitOpenFn,
   }: ExploreProps) => {
-    const dataLinkPostProcessor = useMemo(
-      () => exploreDataLinkPostProcessorFactory(splitOpenFn, range),
-      [splitOpenFn, range]
-    );
+    const dataLinkPostProcessor = useExploreDataLinkPostProcessor(splitOpenFn, range);
 
     return (
       <PrometheusQueryResultsContainer

@@ -3,35 +3,23 @@ import { memo, useState } from 'react';
 import { connect, type ConnectedProps } from 'react-redux';
 import { useAsync } from 'react-use';
 
-import {
-  applyFieldOverrides,
-  type SplitOpen,
-  type DataFrame,
-  LoadingState,
-  FieldType,
-  DataLinksContext,
-  type EventBus,
-  EventBusSrv,
-} from '@grafana/data';
-import { Trans, t } from '@grafana/i18n';
-import { getTemplateSrv, PanelRenderer } from '@grafana/runtime';
+import { type SplitOpen, LoadingState, type EventBus, type GrafanaTheme2 } from '@grafana/data';
 import { type TimeZone } from '@grafana/schema';
-import { type AdHocFilterItem, PanelChrome, useTheme2, PanelContextProvider } from '@grafana/ui';
+import { type AdHocFilterItem, useStyles2 } from '@grafana/ui';
 import { importPanelPlugin } from 'app/features/plugins/importPanelPlugin';
-import {
-  hasDeprecatedParentRowIndex,
-  migrateFromParentRowIndexToNestedFrames,
-} from 'app/plugins/panel/table/migrations';
 import { type ExploreItemState } from 'app/types/explore';
 import { type StoreState } from 'app/types/store';
 
-import { LimitedDataDisclaimer } from '../LimitedDataDisclaimer';
-import { MetaInfoText } from '../MetaInfoText';
+import { useExploreDataLinkPostProcessor } from '../hooks/useExploreDataLinkPostProcessor';
 import { selectIsWaitingForData } from '../state/query';
-import { exploreDataLinkPostProcessorFactory } from '../utils/links';
+
+import { ColumnLimitDisclaimer } from './ColumnLimitDisclaimer';
+import { TableFramePanel } from './TableFramePanel';
+import { TableNoDataPanel } from './TableNoDataPanel';
+import { useTableFrames } from './useTableFrames';
+import { getNonEmptyFrames, getTableTitle } from './utils';
 
 const TEMPO_STREAMING_PROGRESS_REF_ID = 'streaming-progress';
-const MAX_NUMBER_OF_COLUMNS = 20;
 
 interface TableContainerProps {
   exploreId: string;
@@ -74,172 +62,59 @@ export const TableContainer = memo(function TableContainer({
   eventBus,
   queryStreaming = false,
 }: Props) {
-  const theme = useTheme2();
+  const styles = useStyles2(getStyles);
   const [showAll, setShowAll] = useState(false);
   const tablePlugin = useAsync(() => importPanelPlugin('table'), []);
   const panelPadding = tablePlugin.value?.noPadding ? 'none' : 'md';
 
-  function hasSubFrames(data: DataFrame) {
-    return data.fields.some((f) => f.type === FieldType.nestedFrames);
-  }
+  const dataLinkPostProcessor = useExploreDataLinkPostProcessor(splitOpenFn, range);
+  const { frames: dataFrames, dataLimited } = useTableFrames({
+    tableResult,
+    showAllColumns: showAll,
+    timeZone,
+    dataLinkPostProcessor,
+  });
 
-  function getTableHeight(rowCount: number, hasSubFrames: boolean, queryStreaming: boolean) {
-    if (rowCount === 0) {
-      return 200;
-    }
-    // tries to estimate table height, with a min of 300 and a max of 600
-    // if there are multiple tables, there is no min
-    const height = Math.min(600, Math.max(rowCount * 36, hasSubFrames ? 300 : 0) + 40 + 46);
-
-    if (queryStreaming) {
-      return height;
-    }
-    // esure minimum height of 300
-    return Math.max(height, 300);
-  }
-
-  function getTableTitle(dataFrames: DataFrame[] | null, data: DataFrame, i: number) {
-    let name = data.name;
-    if (!name && (dataFrames?.length ?? 0) > 1) {
-      name = data.refId || `${i}`;
-    }
-
-    return name
-      ? t('explore.table.title-with-name', 'Table - {{name}}', { name, interpolation: { escapeValue: false } })
-      : t('explore.table.title', 'Table');
-  }
-
-  let dataFrames = hasDeprecatedParentRowIndex(tableResult)
-    ? migrateFromParentRowIndexToNestedFrames(tableResult)
-    : tableResult;
-  const dataLinkPostProcessor = exploreDataLinkPostProcessorFactory(splitOpenFn, range);
-
-  let dataLimited = false;
-
-  if (dataFrames?.length) {
-    dataFrames = dataFrames.map((frame) => ({
-      ...frame,
-      fields: frame.fields.map((field, index) => {
-        const custom = field.config.custom ?? {};
-
-        const hiddenByColumnLimit = showAll ? false : index >= MAX_NUMBER_OF_COLUMNS;
-        dataLimited = dataLimited || hiddenByColumnLimit;
-
-        const hiddenByDatasource = custom.hideFrom?.viz === true || custom.hidden === true;
-        const hidden = hiddenByDatasource || hiddenByColumnLimit;
-
-        return {
-          ...field,
-          config: {
-            ...field.config,
-            custom: {
-              ...custom,
-              hidden,
-              hideFrom: {
-                ...custom.hideFrom,
-                viz: hidden,
-              },
-            },
-          },
-        };
-      }),
-    }));
-
-    dataFrames = applyFieldOverrides({
-      data: dataFrames,
-      timeZone,
-      theme,
-      replaceVariables: getTemplateSrv().replace.bind(getTemplateSrv()),
-      fieldConfig: {
-        defaults: {},
-        overrides: [],
-      },
-      dataLinkPostProcessor,
-    });
-  }
-
-  const frames = dataFrames?.filter(
-    (frame: DataFrame | undefined): frame is DataFrame => !!frame && frame.length !== 0
-  );
+  const frames = getNonEmptyFrames(dataFrames);
 
   return (
     <>
-      {frames && frames.length === 0 && (
-        <PanelChrome
-          title={t('explore.table.title', 'Table')}
-          width={width}
-          height={200}
-          loadingState={panelLoadingState}
-          // Renders MetaInfoText, not the table panel — don't inherit its noPadding.
-          padding="md"
-        >
-          {() => (
-            // Matches the title's extra inline-start padding (PANEL_TITLE_INSET in Table/TableNG/constants.ts).
-            <div className={css({ paddingInlineStart: theme.spacing.x0_5 })}>
-              <MetaInfoText metaItems={[{ value: t('explore.table.no-data', '0 series returned') }]} />
-            </div>
-          )}
-        </PanelChrome>
-      )}
+      {frames && frames.length === 0 && <TableNoDataPanel width={width} loadingState={panelLoadingState} />}
       {frames && frames.length > 0 && (
-        <div className={css({ display: 'flex', flexDirection: 'column', gap: theme.spacing(1) })}>
+        <div className={styles.tables}>
           {frames.map((data, i) => (
-            <PanelChrome
+            <TableFramePanel
               key={`${data.refId || `table-${i}`}-${panelPadding}`}
+              frame={data}
               title={getTableTitle(dataFrames, data, i)}
               titleItems={[
                 !showAll && dataLimited && (
-                  <LimitedDataDisclaimer
-                    key="disclaimer"
-                    toggleShowAllSeries={() => setShowAll(true)}
-                    info={
-                      <Trans i18nKey={'table.container.show-only-series'}>
-                        Showing only {{ MAX_NUMBER_OF_COLUMNS }} columns
-                      </Trans>
-                    }
-                    tooltip={t(
-                      'table.container.content',
-                      'Showing too many columns in a single table may impact performance and make data harder to read. Consider refining your queries.'
-                    )}
-                    buttonLabel={<Trans i18nKey={'table.container.show-all-series'}>Show all columns</Trans>}
-                  />
+                  <ColumnLimitDisclaimer key="disclaimer" onShowAllColumns={() => setShowAll(true)} />
                 ),
               ]}
               width={width}
-              height={getTableHeight(data.length, hasSubFrames(data), queryStreaming)}
-              loadingState={panelLoadingState}
               padding={panelPadding}
-            >
-              {(innerWidth, innerHeight) => (
-                <DataLinksContext.Provider value={{ dataLinkPostProcessor }}>
-                  <PanelContextProvider
-                    value={{
-                      eventsScope: 'explore',
-                      eventBus: eventBus ?? new EventBusSrv(),
-                      onAddAdHocFilter: onCellFilterAdded,
-                    }}
-                  >
-                    <PanelRenderer
-                      data={{
-                        series: [data],
-                        state: panelLoadingState ?? LoadingState.Done,
-                        timeRange: range,
-                      }}
-                      pluginId={'table'}
-                      title=""
-                      width={innerWidth}
-                      height={innerHeight}
-                      timeZone={timeZone}
-                    />
-                  </PanelContextProvider>
-                </DataLinksContext.Provider>
-              )}
-            </PanelChrome>
+              loadingState={panelLoadingState}
+              queryStreaming={queryStreaming}
+              range={range}
+              timeZone={timeZone}
+              dataLinkPostProcessor={dataLinkPostProcessor}
+              eventBus={eventBus}
+              onCellFilterAdded={onCellFilterAdded}
+            />
           ))}
         </div>
       )}
     </>
   );
+});
+
+const getStyles = (theme: GrafanaTheme2) => ({
+  tables: css({
+    display: 'flex',
+    flexDirection: 'column',
+    gap: theme.spacing(1),
+  }),
 });
 
 export default connector(TableContainer);
