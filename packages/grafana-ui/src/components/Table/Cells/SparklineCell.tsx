@@ -1,45 +1,18 @@
 import * as React from 'react';
 
-import {
-  FieldType,
-  type FieldConfig,
-  getMinMaxAndDelta,
-  type FieldSparkline,
-  isDataFrame,
-  type Field,
-  isDataFrameWithValue,
-  formattedValueToString,
-} from '@grafana/data';
-import {
-  BarAlignment,
-  GraphDrawStyle,
-  type GraphFieldConfig,
-  GraphGradientMode,
-  LineInterpolation,
-  type TableSparklineCellOptions,
-  TableCellDisplayMode,
-  VisibilityMode,
-} from '@grafana/schema';
+import { FieldType, type FieldSparkline, isDataFrame, isDataFrameWithValue } from '@grafana/data';
 
 import { useTheme2 } from '../../../themes/ThemeContext';
-import { measureText } from '../../../utils/measureText';
 import { FormattedValueDisplay } from '../../FormattedValueDisplay/FormattedValueDisplay';
 import { Sparkline } from '../../Sparkline/Sparkline';
 import { getAlignmentFactor, getCellOptions } from '../cellUtils';
+import {
+  getSparklineCellFieldConfig,
+  getSparklineCellOptions,
+  getSparklineCellValueWidth,
+  prepareSparklineForCell,
+} from '../sparklineCellUtils';
 import { type TableCellProps } from '../types';
-
-export const defaultSparklineCellConfig: TableSparklineCellOptions = {
-  type: TableCellDisplayMode.Sparkline,
-  drawStyle: GraphDrawStyle.Line,
-  lineInterpolation: LineInterpolation.Smooth,
-  lineWidth: 1,
-  fillOpacity: 17,
-  gradientMode: GraphGradientMode.Hue,
-  pointSize: 2,
-  barAlignment: BarAlignment.Center,
-  showPoints: VisibilityMode.Never,
-  hideValue: false,
-};
 
 export const SparklineCell = (props: TableCellProps) => {
   const { field, innerWidth, tableStyles, cell, cellProps, timeRange } = props;
@@ -54,36 +27,10 @@ export const SparklineCell = (props: TableCellProps) => {
     );
   }
 
-  // Get the step from the first two values to null-fill the x-axis based on timerange
-  if (sparkline.x && !sparkline.x.config.interval && sparkline.x.values.length > 1) {
-    sparkline.x.config.interval = sparkline.x.values[1] - sparkline.x.values[0];
-  }
+  prepareSparklineForCell(sparkline, timeRange);
 
-  // Remove non-finite values, e.g: NaN, +/-Infinity
-  sparkline.y.values = sparkline.y.values.map((v) => {
-    if (!Number.isFinite(v)) {
-      return null;
-    } else {
-      return v;
-    }
-  });
-
-  const range = getMinMaxAndDelta(sparkline.y);
-  sparkline.y.config.min = range.min;
-  sparkline.y.config.max = range.max;
-  sparkline.y.state = { range };
-  sparkline.timeRange = timeRange;
-
-  const cellOptions = getTableSparklineCellOptions(field);
-
-  const config: FieldConfig<GraphFieldConfig> = {
-    color: field.config.color,
-    thresholds: field.config.thresholds,
-    custom: {
-      ...defaultSparklineCellConfig,
-      ...cellOptions,
-    },
-  };
+  const cellOptions = getSparklineCellOptions(getCellOptions(field));
+  const config = getSparklineCellFieldConfig(field.config, cellOptions);
 
   const hideValue = field.config.custom?.cellOptions?.hideValue;
   let valueWidth = 0;
@@ -93,7 +40,7 @@ export const SparklineCell = (props: TableCellProps) => {
     const displayValue = field.display!(value);
     const alignmentFactor = getAlignmentFactor(field, displayValue, cell.row.index);
 
-    valueWidth = measureText(formattedValueToString(alignmentFactor), 16).width + theme.spacing.gridSize;
+    valueWidth = getSparklineCellValueWidth(alignmentFactor, theme);
 
     valueElement = (
       <FormattedValueDisplay
@@ -146,15 +93,4 @@ function getSparkline(value: unknown): FieldSparkline | undefined {
   }
 
   return;
-}
-
-function getTableSparklineCellOptions(field: Field): TableSparklineCellOptions {
-  let options = getCellOptions(field);
-  if (options.type === TableCellDisplayMode.Auto) {
-    options = { ...options, type: TableCellDisplayMode.Sparkline };
-  }
-  if (options.type === TableCellDisplayMode.Sparkline) {
-    return options;
-  }
-  throw new Error(`Expected options type ${TableCellDisplayMode.Sparkline} but got ${options.type}`);
 }
