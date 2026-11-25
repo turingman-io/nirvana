@@ -2,16 +2,27 @@ import { memo } from 'react';
 
 import { type Field, cacheFieldDisplayNames, type DataFrame, FieldType, getFieldSeriesColor } from '@grafana/data';
 import { AxisPlacement, type VizLegendOptions } from '@grafana/schema';
-import { useTheme2, VizLayout, type VizLayoutLegendProps, VizLegend, type VizLegendItem } from '@grafana/ui';
+import { useTheme2, VizLayout, type VizLayoutLegendLayoutProps, VizLegend, type VizLegendItem } from '@grafana/ui';
 import { getDisplayValuesForCalcs } from '@grafana/ui/internal';
 
-interface BarGaugeLegendProps extends VizLegendOptions, Omit<VizLayoutLegendProps, 'children'> {
+interface BarGaugeLegendProps extends VizLegendOptions, VizLayoutLegendLayoutProps {
   data: DataFrame[];
   colorField?: Field | null;
 }
 
 export const BarGaugeLegend = memo(
-  ({ data, placement, calcs, displayMode, ...vizLayoutLegendProps }: BarGaugeLegendProps) => {
+  ({
+    data,
+    placement,
+    calcs,
+    displayMode,
+    sortBy,
+    sortDesc,
+    overflow,
+    width,
+    maxHeight,
+    maxWidth,
+  }: BarGaugeLegendProps) => {
     const theme = useTheme2();
     let legendItems: VizLegendItem[] = [];
 
@@ -42,15 +53,15 @@ export const BarGaugeLegend = memo(
     });
 
     return (
-      <VizLayout.Legend placement={placement} {...vizLayoutLegendProps}>
+      <VizLayout.Legend placement={placement} width={width} maxHeight={maxHeight} maxWidth={maxWidth}>
         <VizLegend
           placement={placement}
           items={legendItems}
           displayMode={displayMode}
-          sortBy={vizLayoutLegendProps.sortBy}
-          sortDesc={vizLayoutLegendProps.sortDesc}
+          sortBy={sortBy}
+          sortDesc={sortDesc}
           isSortable={true}
-          overflow={vizLayoutLegendProps.overflow}
+          overflow={overflow}
         />
       </VizLayout.Legend>
     );

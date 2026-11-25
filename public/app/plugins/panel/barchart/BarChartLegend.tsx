@@ -14,14 +14,14 @@ import { type VizLegendOptions, AxisPlacement } from '@grafana/schema';
 import {
   type UPlotConfigBuilder,
   VizLayout,
-  type VizLayoutLegendProps,
+  type VizLayoutLegendLayoutProps,
   VizLegend,
   type VizLegendItem,
   useTheme2,
 } from '@grafana/ui';
 import { getDisplayValuesForCalcs } from '@grafana/ui/internal';
 import { getThresholdItems, getValueMappingItems } from 'app/core/components/TimelineChart/utils';
-interface BarChartLegend2Props extends VizLegendOptions, Omit<VizLayoutLegendProps, 'children'> {
+interface BarChartLegend2Props extends VizLegendOptions, VizLayoutLegendLayoutProps {
   data: DataFrame[];
   colorField?: Field | null;
   // config: UPlotConfigBuilder;
@@ -44,7 +44,18 @@ export function hasVisibleLegendSeries(config: UPlotConfigBuilder, data: DataFra
 }
 
 export const BarChartLegend = memo(
-  ({ data, placement, calcs, displayMode, colorField, ...vizLayoutLegendProps }: BarChartLegend2Props) => {
+  ({
+    data,
+    placement,
+    calcs,
+    displayMode,
+    sortBy,
+    sortDesc,
+    overflow,
+    width,
+    maxHeight,
+    maxWidth,
+  }: BarChartLegend2Props) => {
     const theme = useTheme2();
 
     const fieldConfig = data[0].fields[0].config;
@@ -125,17 +136,17 @@ export const BarChartLegend = memo(
       .filter((i): i is VizLegendItem => i !== undefined);
 
     return (
-      <VizLayout.Legend placement={placement} {...vizLayoutLegendProps}>
+      <VizLayout.Legend placement={placement} width={width} maxHeight={maxHeight} maxWidth={maxWidth}>
         <VizLegend
           placement={placement}
           items={legendItems}
           thresholdItems={thresholdItems}
           mappingItems={valueMappingItems}
           displayMode={displayMode}
-          sortBy={vizLayoutLegendProps.sortBy}
-          sortDesc={vizLayoutLegendProps.sortDesc}
+          sortBy={sortBy}
+          sortDesc={sortDesc}
           isSortable={true}
-          overflow={vizLayoutLegendProps.overflow}
+          overflow={overflow}
         />
       </VizLayout.Legend>
     );

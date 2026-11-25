@@ -32,6 +32,7 @@ export {
 } from '../components/uPlot/utils';
 export { hasVisibleLegendSeries, PlotLegend } from '../components/uPlot/PlotLegend';
 export { shouldShowLegend } from '../components/VizLegend/utils';
+export { getVizLayoutLegendPlacement } from '../components/VizLayout/utils';
 export { getScaleGradientFn } from '../components/uPlot/config/gradientFills';
 export { buildScaleKey } from '../components/uPlot/internal';
 export { type TimeRange2, TooltipHoverMode } from '../components/uPlot/plugins/TooltipPlugin2';
