@@ -1,6 +1,6 @@
-import { FieldColorModeId, type FieldDisplay } from '@grafana/data';
+import { createTheme, FALLBACK_COLOR, FieldColorModeId, type FieldDisplay } from '@grafana/data';
 
-import { computeGradientFills } from './PieChart';
+import { computeGradientFills, getGradientFills, getSliceColor } from './PieChartGradient';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -310,5 +310,54 @@ describe('computeGradientFills', () => {
       expect(fills.has(diffFrom)).toBe(false);
       expect(diffFrom.display.color).toBe('#0000ff');
     });
+  });
+});
+
+describe('getGradientFills', () => {
+  const theme = createTheme();
+
+  it('returns undefined when no slice uses the gradient color scheme', () => {
+    const items = [makeItem('palette', 10), makeItemWithFixedOverride('fixed', 20, '#0000ff')];
+
+    expect(getGradientFills(items, theme)).toBeUndefined();
+  });
+
+  it('ranks slices only against slices with the same gradient colors', () => {
+    const large = makeGradientItem('large', 90, COLOR_GREEN, COLOR_RED);
+    const small = makeGradientItem('small', 10, COLOR_GREEN, COLOR_RED);
+    const blueToRed = makeGradientItem('blueToRed', 50, '#0000ff', COLOR_RED);
+    const fixed = makeItemWithFixedOverride('fixed', 70, '#0000ff');
+
+    const fills = getGradientFills([small, blueToRed, fixed, large], theme);
+
+    expect(fills?.get(large)).toBe(COLOR_GREEN);
+    expect(fills?.get(small)).toBe(COLOR_RED);
+    // Alone in its group, so it gets the group's start color.
+    expect(fills?.get(blueToRed)).toBe('#0000ff');
+    expect(fills?.has(fixed)).toBe(false);
+  });
+
+  it('leaves out slices hidden from the chart and slices without a numeric value', () => {
+    const visible = makeGradientItem('visible', 50, COLOR_GREEN, COLOR_RED);
+    const hidden = makeGradientItem('hidden', 90, COLOR_GREEN, COLOR_RED);
+    hidden.field.custom = { hideFrom: { viz: true } };
+    const empty = makeGradientItem('empty', NaN, COLOR_GREEN, COLOR_RED);
+
+    const fills = getGradientFills([visible, hidden, empty], theme);
+
+    expect(fills?.size).toBe(1);
+    expect(fills?.get(visible)).toBe(COLOR_GREEN);
+  });
+});
+
+describe('getSliceColor', () => {
+  it('uses the gradient fill, then the display color, then the fallback color', () => {
+    const withFill = makeGradientItem('withFill', 10, COLOR_GREEN, COLOR_RED);
+    const withoutFill = makeItemWithFixedOverride('withoutFill', 20, '#0000ff');
+    const fills = new Map([[withFill, '#123456']]);
+
+    expect(getSliceColor(withFill, fills)).toBe('#123456');
+    expect(getSliceColor(withoutFill, fills)).toBe('#0000ff');
+    expect(getSliceColor(makeItem('noColor', 30))).toBe(FALLBACK_COLOR);
   });
 });
