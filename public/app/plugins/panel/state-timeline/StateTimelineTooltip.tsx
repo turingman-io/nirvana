@@ -12,7 +12,7 @@ import {
   getFieldDisplayItems,
   isTooltipScrollable,
 } from '@grafana/ui';
-import { findNextStateIndex, fmtDuration, ZERO_DURATION_END_OFFSET } from 'app/core/components/TimelineChart/utils';
+import { fmtDuration, getStateEndTime } from 'app/core/components/TimelineChart/utils';
 
 import { getFieldActions } from '../status-history/utils';
 import { type TimeSeriesTooltipProps } from '../timeseries/TimeSeriesTooltip';
@@ -51,29 +51,10 @@ export const StateTimelineTooltip = ({
 
   // append duration in single mode
   if (withDuration && mode === TooltipDisplayMode.Single) {
-    const field = series.fields[seriesIdx!];
-    const nextStateIdx = findNextStateIndex(field, dataIdx!);
-    let nextStateTs;
-    if (nextStateIdx != null) {
-      nextStateTs = xField.values[nextStateIdx];
-    }
-
     const stateTs = xField.values[dataIdx!];
-    let duration: string;
+    endTime = getStateEndTime(xField, series.fields[seriesIdx!], dataIdx!, timeRange);
 
-    if (nextStateTs != null && nextStateTs - stateTs === ZERO_DURATION_END_OFFSET) {
-      duration = fmtDuration(0);
-      endTime = stateTs;
-    } else if (nextStateTs) {
-      duration = nextStateTs && fmtDuration(nextStateTs - stateTs);
-      endTime = nextStateTs;
-    } else {
-      const to = timeRange.to.valueOf();
-      duration = fmtDuration(to - stateTs);
-      endTime = to;
-    }
-
-    contentItems.push({ label: 'Duration', value: duration });
+    contentItems.push({ label: 'Duration', value: fmtDuration(endTime - stateTs) });
   }
 
   let footer: ReactNode;

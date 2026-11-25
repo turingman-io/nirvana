@@ -24,51 +24,13 @@ import {
 } from '@grafana/data';
 import { maybeSortFrame, NULL_RETAIN } from '@grafana/data/internal';
 import { t } from '@grafana/i18n';
-import {
-  type VizLegendOptions,
-  AxisPlacement,
-  ScaleDirection,
-  ScaleOrientation,
-  type VisibilityMode,
-  type TimelineValueAlignment,
-  type HideableFieldConfig,
-  MappingType,
-} from '@grafana/schema';
+import { type VizLegendOptions, AxisPlacement, ScaleDirection, ScaleOrientation, MappingType } from '@grafana/schema';
 import { FIXED_UNIT, UPlotConfigBuilder, type UPlotConfigPrepFn, type VizLegendItem } from '@grafana/ui';
 import { preparePlotData2, getStackingGroups, shouldShowLegend } from '@grafana/ui/internal';
 import { findFrameWithNullTimeValue } from 'app/features/panel/frames/validation';
 
 import { getConfig, type TimelineCoreOptions } from './timeline';
-
-/**
- * @internal
- */
-interface UPlotConfigOptions {
-  frame: DataFrame;
-  theme: GrafanaTheme2;
-  mode: TimelineMode;
-  rowHeight?: number;
-  colWidth?: number;
-  showValue: VisibilityMode;
-  alignValue?: TimelineValueAlignment;
-  mergeValues?: boolean;
-  getValueColor: (frameIdx: number, fieldIdx: number, value: unknown) => string;
-  hoverMulti: boolean;
-  axisWidth?: number;
-}
-
-/**
- * @internal
- */
-interface PanelFieldConfig extends HideableFieldConfig {
-  fillOpacity?: number;
-  lineWidth?: number;
-}
-
-export enum TimelineMode {
-  Changes = 'changes',
-  Samples = 'samples',
-}
+import { type PanelFieldConfig, type UPlotConfigOptions } from './types';
 
 const defaultConfig: PanelFieldConfig = {
   lineWidth: 0,
@@ -334,18 +296,163 @@ function mergeThresholdValues(field: Field, theme: GrafanaTheme2): Field | undef
   };
 }
 
-export const ZERO_DURATION_END_OFFSET = 0.5;
+/**
+ * Finds the first two time fields with numeric values: the state start times and, when the frame has them,
+ * the state end times. A missing field has index -1.
+ */
+function findStateTimeFields(frame: DataFrame): { startFieldIdx: number; endFieldIdx: number } {
+  let startFieldIdx = -1;
+  let endFieldIdx = -1;
 
-function ensureEndAfterStart(startField: Field, endField: Field): Field {
-  return {
-    ...endField,
-    values: endField.values.map((end, i) => {
-      const start = startField.values[i];
-      if (end == null || start == null || end > start) {
-        return end;
+  for (let i = 0; i < frame.fields.length; i++) {
+    const f = frame.fields[i];
+
+    if (f.type === FieldType.time && typeof f.values[0] === 'number') {
+      if (startFieldIdx === -1) {
+        startFieldIdx = i;
+      } else if (endFieldIdx === -1) {
+        endFieldIdx = i;
+        break;
       }
-      return start + ZERO_DURATION_END_OFFSET;
-    }),
+    }
+  }
+
+  return { startFieldIdx, endFieldIdx };
+}
+
+/**
+ * Outer joins the state end times into the frame's time field, with null values at the end times.
+ */
+function joinStateEndTimes(frame: DataFrame, endFieldIdx: number): DataFrame {
+  const startFrame: DataFrame = {
+    ...frame,
+    fields: frame.fields.filter((f, i) => i !== endFieldIdx),
+  };
+
+  const endFrame: DataFrame = {
+    length: frame.length,
+    fields: [frame.fields[endFieldIdx]],
+  };
+
+  const joined = outerJoinDataFrames({
+    frames: [startFrame, endFrame],
+    keepDisplayNames: true,
+    nullMode: () => NULL_RETAIN,
+  })!;
+
+  joined.fields.forEach((f, i) => {
+    if (i > 0) {
+      const vals = f.values;
+      for (let i = 0; i < vals.length; i++) {
+        if (vals[i] == null) {
+          vals[i] = null;
+        }
+      }
+    }
+  });
+
+  return joined;
+}
+
+/**
+ * Returns the field the way the timeline graphs it, or undefined when fields of its type can't be graphed.
+ */
+function prepareValueField(field: Field, mergeValues: boolean, theme: GrafanaTheme2): Field | undefined {
+  switch (field.type) {
+    case FieldType.enum:
+    case FieldType.number:
+      if (mergeValues && field.config.color?.mode === FieldColorModeId.Thresholds) {
+        const merged = mergeThresholdValues(field, theme);
+        if (merged) {
+          return merged;
+        }
+      }
+
+    case FieldType.boolean:
+    case FieldType.string:
+      return {
+        ...field,
+        config: {
+          ...field.config,
+          custom: {
+            ...field.config.custom,
+            spanNulls: getSpanNulls(field),
+          },
+        },
+      };
+    default:
+      return undefined;
+  }
+}
+
+interface PreparedTimelineFrame {
+  /** Only set when the frame has a time field and at least one field that can be graphed */
+  frame?: DataFrame;
+  /** Whether the frame has a time field with numeric values */
+  hasTimeField: boolean;
+}
+
+/**
+ * Sorts a frame by time, joins its state end times, inserts nulls by the null threshold and keeps only
+ * the fields the timeline can graph.
+ */
+function prepareTimelineFrame(
+  frame: DataFrame,
+  mergeValues: boolean,
+  timeRange: TimeRange,
+  theme: GrafanaTheme2
+): PreparedTimelineFrame {
+  const { startFieldIdx, endFieldIdx } = findStateTimeFields(frame);
+
+  let isTimeseries = startFieldIdx !== -1;
+  let hasTimeField = false;
+  let changed = false;
+  frame = maybeSortFrame(frame, startFieldIdx);
+
+  // if we have a second time field, assume it is state end timestamps
+  // and insert nulls into the data at the end timestamps
+  if (endFieldIdx !== -1) {
+    frame = joinStateEndTimes(frame, endFieldIdx);
+    changed = true;
+  }
+
+  const nulledFrame = applyNullInsertThreshold({
+    frame,
+    refFieldPseudoMin: timeRange.from.valueOf(),
+    refFieldPseudoMax: timeRange.to.valueOf(),
+  });
+
+  if (nulledFrame !== frame) {
+    changed = true;
+  }
+
+  frame = nullToValue(nulledFrame);
+
+  const fields: Field[] = [];
+  for (const field of frame.fields) {
+    if (field.type === FieldType.time) {
+      if (typeof field.values[0] === 'number') {
+        isTimeseries = true;
+        hasTimeField = true;
+        fields.push(field);
+      }
+      continue;
+    }
+
+    const valueField = prepareValueField(field, mergeValues, theme);
+    if (valueField) {
+      fields.push(valueField);
+    }
+    changed = true;
+  }
+
+  if (!isTimeseries || fields.length < 2) {
+    return { hasTimeField };
+  }
+
+  return {
+    frame: changed ? { ...frame, fields } : frame,
+    hasTimeField: true,
   };
 }
 
@@ -366,122 +473,14 @@ export function prepareTimelineFields(
   let hasTimeseries = false;
   const frames: DataFrame[] = [];
 
-  for (let frame of series) {
-    let startFieldIdx = -1;
-    let endFieldIdx = -1;
+  for (const frame of series) {
+    const prepared = prepareTimelineFrame(frame, mergeValues, timeRange, theme);
 
-    for (let i = 0; i < frame.fields.length; i++) {
-      let f = frame.fields[i];
-
-      if (f.type === FieldType.time && typeof f.values[0] === 'number') {
-        if (startFieldIdx === -1) {
-          startFieldIdx = i;
-        } else if (endFieldIdx === -1) {
-          endFieldIdx = i;
-          break;
-        }
-      }
-    }
-
-    let isTimeseries = startFieldIdx !== -1;
-    let changed = false;
-    frame = maybeSortFrame(frame, startFieldIdx);
-
-    // if we have a second time field, assume it is state end timestamps
-    // and insert nulls into the data at the end timestamps
-    if (endFieldIdx !== -1) {
-      let startFrame: DataFrame = {
-        ...frame,
-        fields: frame.fields.filter((f, i) => i !== endFieldIdx),
-      };
-
-      let endFrame: DataFrame = {
-        length: frame.length,
-        fields: [ensureEndAfterStart(frame.fields[startFieldIdx], frame.fields[endFieldIdx])],
-      };
-
-      frame = outerJoinDataFrames({
-        frames: [startFrame, endFrame],
-        keepDisplayNames: true,
-        nullMode: () => NULL_RETAIN,
-      })!;
-
-      frame.fields.forEach((f, i) => {
-        if (i > 0) {
-          let vals = f.values;
-          for (let i = 0; i < vals.length; i++) {
-            if (vals[i] == null) {
-              vals[i] = null;
-            }
-          }
-        }
-      });
-
-      changed = true;
-    }
-
-    let nulledFrame = applyNullInsertThreshold({
-      frame,
-      refFieldPseudoMin: timeRange.from.valueOf(),
-      refFieldPseudoMax: timeRange.to.valueOf(),
-    });
-
-    if (nulledFrame !== frame) {
-      changed = true;
-    }
-
-    frame = nullToValue(nulledFrame);
-
-    const fields: Field[] = [];
-    for (let field of frame.fields) {
-      switch (field.type) {
-        case FieldType.time:
-          if (typeof field.values[0] === 'number') {
-            isTimeseries = true;
-            hasTimeseries = true;
-            fields.push(field);
-          }
-          break;
-        case FieldType.enum:
-        case FieldType.number:
-          if (mergeValues && field.config.color?.mode === FieldColorModeId.Thresholds) {
-            const f = mergeThresholdValues(field, theme);
-            if (f) {
-              fields.push(f);
-              changed = true;
-              continue;
-            }
-          }
-
-        case FieldType.boolean:
-        case FieldType.string:
-          field = {
-            ...field,
-            config: {
-              ...field.config,
-              custom: {
-                ...field.config.custom,
-                spanNulls: getSpanNulls(field),
-              },
-            },
-          };
-          changed = true;
-          fields.push(field);
-          break;
-        default:
-          changed = true;
-      }
-    }
-    if (isTimeseries && fields.length > 1) {
+    if (prepared.hasTimeField) {
       hasTimeseries = true;
-      if (changed) {
-        frames.push({
-          ...frame,
-          fields,
-        });
-      } else {
-        frames.push(frame);
-      }
+    }
+    if (prepared.frame) {
+      frames.push(prepared.frame);
     }
   }
 
@@ -726,6 +725,17 @@ export function findNextStateIndex(field: Field, datapointIdx: number) {
   }
 
   return end;
+}
+
+/**
+ * Returns when the state at `dataIdx` ends: when the next state starts, or at the end of the time range for the
+ * last state.
+ */
+export function getStateEndTime(xField: Field, field: Field, dataIdx: number, timeRange: TimeRange): number {
+  const nextStateIdx = findNextStateIndex(field, dataIdx);
+  const nextStateTs = nextStateIdx != null ? xField.values[nextStateIdx] : undefined;
+
+  return nextStateTs || timeRange.to.valueOf();
 }
 
 /**
