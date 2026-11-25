@@ -1,8 +1,9 @@
 import { lazy, Suspense, useMemo } from 'react';
 
-import { applyFieldOverrides, type PrometheusQueryResultsV1Props } from '@grafana/data';
-import { getTemplateSrv } from '@grafana/runtime';
+import { type PrometheusQueryResultsV1Props } from '@grafana/data';
 import { useTheme2 } from '@grafana/ui';
+
+import { applyTableFieldOverrides } from '../Table/utils';
 
 const RawPrometheusContainerPureLazy = lazy(() =>
   import('./RawPrometheusContainerPure').then((m) => ({ default: m.RawPrometheusContainerPure }))
@@ -42,12 +43,9 @@ export const PrometheusQueryResultsContainer = (props: PrometheusQueryResultsV1P
   const processedData = useMemo(() => {
     const tableResult = props.tableResult ?? [];
     if (tableResult.length) {
-      return applyFieldOverrides({
-        data: tableResult,
+      return applyTableFieldOverrides(tableResult, {
         timeZone,
         theme,
-        replaceVariables: getTemplateSrv().replace.bind(getTemplateSrv()),
-        fieldConfig: { defaults: {}, overrides: [] },
         dataLinkPostProcessor: props.dataLinkPostProcessor,
       });
     }

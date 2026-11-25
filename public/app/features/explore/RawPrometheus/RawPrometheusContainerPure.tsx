@@ -12,6 +12,7 @@ import { TABLE_RESULTS_STYLE, TABLE_RESULTS_STYLES, type TableResultsStyle } fro
 
 import { MetaInfoText } from '../MetaInfoText';
 import RawListContainer from '../PrometheusListView/RawListContainer';
+import { getNonEmptyFrames } from '../Table/utils';
 
 const getStyles = (_theme: GrafanaTheme2) => ({
   spacing: css({
@@ -98,9 +99,7 @@ export const RawPrometheusContainerPure = memo(
     const height = getTableHeight();
     const tableWidth = width - config.theme.panelPadding * 2 - PANEL_BORDER;
 
-    const frames = tableResult?.filter(
-      (frame: DataFrame | undefined): frame is DataFrame => !!frame && frame.length !== 0
-    );
+    const frames = getNonEmptyFrames(tableResult);
 
     const title = resultsStyle === TABLE_RESULTS_STYLE.raw ? 'Raw' : 'Table';
     const label = resultsStyle !== undefined ? renderLabel() : 'Table';
