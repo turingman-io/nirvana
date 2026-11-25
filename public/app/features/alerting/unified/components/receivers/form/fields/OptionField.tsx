@@ -24,6 +24,10 @@ import {
   type NotificationChannelSecureFields,
   type OptionMeta,
 } from 'app/features/alerting/unified/types/alerting';
+import {
+  type DeleteSubformHandler,
+  type ResetSecureFieldHandler,
+} from 'app/features/alerting/unified/types/receiver-form';
 
 import { KeyValueMapInput } from './KeyValueMapInput';
 import { StringArrayInput } from './StringArrayInput';
@@ -40,8 +44,8 @@ interface Props {
   error?: FieldError | DeepMap<any, FieldError>;
   readOnly?: boolean;
   customValidator?: (value: string) => boolean | string | Promise<boolean | string>;
-  onResetSecureField?: (propertyName: string) => void;
-  onDeleteSubform?: (settingsPath: string, option: NotificationChannelOption) => void;
+  onResetSecureField?: ResetSecureFieldHandler;
+  onDeleteSubform?: DeleteSubformHandler;
   secureFields: NotificationChannelSecureFields;
 }
 

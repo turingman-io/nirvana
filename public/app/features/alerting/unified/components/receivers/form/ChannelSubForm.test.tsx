@@ -85,7 +85,6 @@ describe('ChannelSubForm', () => {
           <ChannelSubForm
             defaultValues={defaults}
             initialValues={initial}
-            pathPrefix={`items.0.`}
             integrationIndex={0}
             notifiers={notifiers}
             onDuplicate={jest.fn()}
@@ -321,7 +320,6 @@ describe('ChannelSubForm', () => {
             <ChannelSubForm
               defaultValues={defaults}
               initialValues={initial}
-              pathPrefix={`items.0.`}
               integrationIndex={0}
               notifiers={versionedNotifiers}
               onDuplicate={jest.fn()}
@@ -455,7 +453,6 @@ describe('ChannelSubForm', () => {
             <FormProvider {...form}>
               <ChannelSubForm
                 defaultValues={defaults}
-                pathPrefix={`items.0.`}
                 integrationIndex={0}
                 notifiers={notifiersWithLegacyOnly}
                 onDuplicate={jest.fn()}

@@ -8,6 +8,10 @@ import {
   type NotificationChannelSecureFields,
   type OptionMeta,
 } from 'app/features/alerting/unified/types/alerting';
+import {
+  type DeleteSubformHandler,
+  type ResetSecureFieldHandler,
+} from 'app/features/alerting/unified/types/receiver-form';
 
 import { ActionIcon } from '../../../rules/ActionIcon';
 
@@ -26,8 +30,8 @@ interface Props {
    * Callback function to delete a subform field. Removal requires side effects
    * like settings and secure fields cleanup.
    */
-  onDelete?: (settingsPath: string, option: NotificationChannelOption) => void;
-  onResetSecureField?: (propertyName: string) => void;
+  onDelete?: DeleteSubformHandler;
+  onResetSecureField?: ResetSecureFieldHandler;
 }
 
 export const SubformField = ({
