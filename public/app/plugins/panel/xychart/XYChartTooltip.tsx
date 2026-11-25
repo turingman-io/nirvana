@@ -13,7 +13,7 @@ import {
 import { getFieldActions } from '../status-history/utils';
 
 import { type XYSeries } from './types2';
-import { fmt } from './utils';
+import { fmt, getFieldName } from './utils';
 
 export interface Props {
   dataIdxs: Array<number | null>;
@@ -37,10 +37,6 @@ function stripSeriesName(fieldName: string, seriesName: string) {
 
 function hideFromTooltip(field: Field) {
   return field.config.custom.hideFrom?.tooltip ?? false;
-}
-
-function getFieldName(field: Field) {
-  return field.state?.displayName ?? field.name;
 }
 
 export const XYChartTooltip = ({
@@ -119,7 +115,7 @@ export const XYChartTooltip = ({
   series._rest.forEach((field) => {
     if (!hideFromTooltip(field)) {
       contentItems.push({
-        label: stripSeriesName(field.state?.displayName ?? field.name, label),
+        label: stripSeriesName(getFieldName(field), label),
         value: fmt(field, field.values[rowIndex]),
       });
     }

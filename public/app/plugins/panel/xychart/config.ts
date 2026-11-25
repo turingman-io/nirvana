@@ -12,8 +12,7 @@ import { commonOptionsBuilder } from '@grafana/ui';
 import { LineStyleEditor } from '../timeseries/LineStyleEditor';
 
 import { type FieldConfig, XYShowMode, PointShape } from './panelcfg.gen';
-
-const DEFAULT_POINT_SIZE = 5;
+import { DEFAULT_POINT_SIZE } from './pointSize';
 
 export function getScatterFieldConfig(cfg: FieldConfig): SetFieldConfigOptionsArgs<FieldConfig> {
   return {

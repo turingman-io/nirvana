@@ -17,7 +17,8 @@ import { config } from '@grafana/runtime';
 import { VisibilityMode } from '@grafana/schema';
 
 import { XYShowMode, SeriesMapping, type XYSeriesConfig } from './panelcfg.gen';
-import { type XYSeries } from './types2';
+import { DEFAULT_POINT_SIZE, DEFAULT_POINT_SIZE_MAX, DEFAULT_POINT_SIZE_MIN } from './pointSize';
+import { type ValueRange, type XYSeries } from './types2';
 
 export function fmt(field: Field, val: number): string {
   if (field.display) {
@@ -25,6 +26,40 @@ export function fmt(field: Field, val: number): string {
   }
 
   return `${val}`;
+}
+
+export function getFieldName(field: Field) {
+  return field.state?.displayName ?? field.name;
+}
+
+/** min and max of the non-null values of all given fields */
+export function getValueRange(fields: Array<Field | undefined>): ValueRange {
+  const range: ValueRange = {
+    min: Infinity,
+    max: -Infinity,
+  };
+
+  for (const field of fields) {
+    if (field != null) {
+      const vals = field.values;
+
+      for (let i = 0; i < vals.length; i++) {
+        const v = vals[i];
+
+        if (v != null) {
+          if (v < range.min) {
+            range.min = v;
+          }
+
+          if (v > range.max) {
+            range.max = v;
+          }
+        }
+      }
+    }
+  }
+
+  return range;
 }
 
 // cause we dont have a proper matcher for this currently
@@ -157,8 +192,8 @@ export function prepSeries(
 
             if (size != null) {
               ser.size.field = size;
-              ser.size.min = size.config.custom.pointSize?.min ?? 5;
-              ser.size.max = size.config.custom.pointSize?.max ?? 100;
+              ser.size.min = size.config.custom.pointSize?.min ?? DEFAULT_POINT_SIZE_MIN;
+              ser.size.max = size.config.custom.pointSize?.max ?? DEFAULT_POINT_SIZE_MAX;
               // ser.size.mode =
             }
 
@@ -215,7 +250,7 @@ export function prepSeries(
 
       if (s.size.field == null) {
         // derive fixed size from y field config
-        s.size.fixed = s.y.field.config.custom.pointSize?.fixed ?? 5;
+        s.size.fixed = s.y.field.config.custom.pointSize?.fixed ?? DEFAULT_POINT_SIZE;
         // ser.size.mode =
       }
     });
