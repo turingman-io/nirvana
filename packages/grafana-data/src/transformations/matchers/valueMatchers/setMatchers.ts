@@ -2,26 +2,12 @@ import { TableCellDisplayMode } from '@grafana/schema';
 
 import { getDisplayProcessor } from '../../../field/displayProcessor';
 import { createTheme } from '../../../themes/createTheme';
-import { type Field, type FieldConfig } from '../../../types/dataFrame';
-import { type ValueMatcherInfo } from '../../../types/transformations';
+import { type Field } from '../../../types/dataFrame';
 import { formattedValueToString } from '../../../valueFormats/baseFormatters';
 import { ValueMatcherID } from '../ids';
 import { getPillElements } from '../pillElements';
 
-export interface ValueSetOptions {
-  values: unknown[];
-  mode?: 'raw' | 'display';
-  displayConfig?: FieldConfig;
-  timeZone?: string;
-  /** When specified, match null/undefined independently of formatted values. */
-  includeMissing?: boolean;
-  /**
-   * When true, multi-valued cells match when any element is in the set: array
-   * values are matched element-wise, and pill-formatted strings per rendered
-   * pill. Scalar values behave exactly as before.
-   */
-  matchElements?: boolean;
-}
+import { createValueMatcherInfo } from './createValueMatcherInfo';
 
 /** True when the field renders as pill cells, whose text holds multiple values. */
 export function isPillCellField(field: Field): boolean {
@@ -62,19 +48,19 @@ export function getValueSetCandidates(field: Field, value: unknown): unknown[] {
 
 const fallbackTheme = createTheme();
 
-export const valueSetMatcher: ValueMatcherInfo<ValueSetOptions> = {
+export const valueSetMatcher = createValueMatcherInfo({
   id: ValueMatcherID.inSet,
   name: 'Is in set',
   description: 'Matches a set of raw or formatted values.',
   // The transformation editor does not yet provide controls for this matcher.
-  isApplicable: () => false,
+  fieldTypes: [],
+  getOptionsDisplayText: (options) => `Is in set: ${Array.isArray(options.values) ? options.values.join(', ') : ''}`,
   getDefaultOptions: () => ({ values: [] }),
-  get: (options) => {
+  getValuePredicate: (options) => {
     const selected = new Set(options.values);
     const displays = new WeakMap<Field, ReturnType<typeof getDisplayProcessor>>();
     const matchElements = options.matchElements === true;
-    return (index, field) => {
-      const value = field.values[index];
+    return (value, field) => {
       if (options.includeMissing !== undefined && value == null) {
         return options.includeMissing;
       }
@@ -103,5 +89,4 @@ export const valueSetMatcher: ValueMatcherInfo<ValueSetOptions> = {
       );
     };
   },
-  getOptionsDisplayText: (options) => `Is in set: ${Array.isArray(options.values) ? options.values.join(', ') : ''}`,
-};
+});

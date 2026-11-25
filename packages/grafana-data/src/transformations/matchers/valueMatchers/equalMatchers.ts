@@ -1,43 +1,30 @@
-import { type Field } from '../../../types/dataFrame';
 import { type ValueMatcherInfo } from '../../../types/transformations';
 import { ValueMatcherID } from '../ids';
 
-import { type BasicValueMatcherOptions } from './types';
+import { createValueMatcherInfo } from './createValueMatcherInfo';
 
-const isEqualValueMatcher: ValueMatcherInfo<BasicValueMatcherOptions> = {
+const isEqualValueMatcher = createValueMatcherInfo({
   id: ValueMatcherID.equal,
   name: 'Is equal',
   description: 'Match where value for given field is equal to options value.',
-  get: (options) => {
-    return (valueIndex: number, field: Field) => {
-      const value = field.values[valueIndex];
-      // eslint-disable-next-line eqeqeq
-      return value == options.value;
-    };
-  },
   getOptionsDisplayText: () => {
     return `Matches all rows where field is null.`;
   },
-  isApplicable: () => true,
   getDefaultOptions: () => ({ value: '' }),
-};
+  // eslint-disable-next-line eqeqeq
+  getValuePredicate: (options) => (value) => value == options.value,
+});
 
-const isNotEqualValueMatcher: ValueMatcherInfo<BasicValueMatcherOptions> = {
+const isNotEqualValueMatcher = createValueMatcherInfo({
   id: ValueMatcherID.notEqual,
   name: 'Is not equal',
   description: 'Match where value for given field is not equal to options value.',
-  get: (options) => {
-    return (valueIndex: number, field: Field) => {
-      const value = field.values[valueIndex];
-      // eslint-disable-next-line eqeqeq
-      return value != options.value;
-    };
-  },
   getOptionsDisplayText: () => {
     return `Matches all rows where field is not null.`;
   },
-  isApplicable: () => true,
   getDefaultOptions: () => ({ value: '' }),
-};
+  // eslint-disable-next-line eqeqeq
+  getValuePredicate: (options) => (value) => value != options.value,
+});
 
 export const getEqualValueMatchers = (): ValueMatcherInfo[] => [isEqualValueMatcher, isNotEqualValueMatcher];
