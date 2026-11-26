@@ -14633,6 +14633,7 @@
       "connections-tab": {
         "description": "You currently have the following data sources configured for {{pluginName}}, click a tile to view the configuration details. You can find all of your data source connections in <4><0>Connections</0> - <3>Data sources</3>.</4>"
       },
+      "copy-plugin-id": "Copy plugin ID",
       "disabled-error": {
         "angular-deprecation-link": "Read more about angular deprecation",
         "angular-error-text": "This plugin has been disabled as Grafana no longer supports Angular based plugins. You can try updating the plugin to the latest version to resolve this issue. You should then test to confirm it works as expected.",
@@ -14659,6 +14660,7 @@
         "latestVersion": "Latest Version",
         "license": "License",
         "moreDetails": "Plugin Insights are currently in preview, share your feedback to help us surface the most useful information <2>here</2>.",
+        "pluginId": "Plugin ID",
         "pluginInsights": {
           "header": "Plugin insights"
         },
