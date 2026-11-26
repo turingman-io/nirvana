@@ -1,6 +1,6 @@
 import { css, cx } from '@emotion/css';
 import { concat, uniq, upperFirst, without } from 'lodash';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useFieldArray, useFormContext } from 'react-hook-form';
 
 import { type GrafanaTheme2 } from '@grafana/data';
@@ -57,7 +57,9 @@ export const MuteTimingTimeInterval = () => {
                     prefix={<Icon name="map-marker" />}
                     width={50}
                     onChange={(selectedTimezone) => {
-                      setValue(`time_intervals.${timeIntervalIndex}.location`, selectedTimezone.value);
+                      setValue(`time_intervals.${timeIntervalIndex}.location`, selectedTimezone.value, {
+                        shouldDirty: true,
+                      });
                     }}
                     // @ts-ignore react-hook-form doesn't handle nested field arrays well
                     defaultValue={{ label: timeInterval.location, value: timeInterval.location }}
@@ -67,7 +69,7 @@ export const MuteTimingTimeInterval = () => {
                 <Field label={t('alerting.mute-timing-time-interval.label-days-of-the-week', 'Days of the week')}>
                   <DaysOfTheWeek
                     onChange={(daysOfWeek) => {
-                      setValue(`time_intervals.${timeIntervalIndex}.weekdays`, daysOfWeek);
+                      setValue(`time_intervals.${timeIntervalIndex}.weekdays`, daysOfWeek, { shouldDirty: true });
                     }}
                     // @ts-ignore react-hook-form doesn't handle nested field arrays well
                     defaultValue={timeInterval.weekdays}
@@ -237,18 +239,14 @@ function parseWeekdayRange(input: string): string[] {
 
 const DaysOfTheWeek = ({ defaultValue = '', onChange }: DaysOfTheWeekProps) => {
   const styles = useStyles2(getStyles);
-  const defaultValues = parseDays(defaultValue);
-  const [selectedDays, setSelectedDays] = useState<string[]>(defaultValues);
+  const [selectedDays, setSelectedDays] = useState<string[]>(() => parseDays(defaultValue));
 
+  // The days the interval was loaded with are already in the form, so only a click reports a selection
   const toggleDay = (day: string) => {
-    selectedDays.includes(day)
-      ? setSelectedDays((selectedDays) => without(selectedDays, day))
-      : setSelectedDays((selectedDays) => concat(selectedDays, day));
+    const nextDays = selectedDays.includes(day) ? without(selectedDays, day) : concat(selectedDays, day);
+    setSelectedDays(nextDays);
+    onChange(nextDays.join(', '));
   };
-
-  useEffect(() => {
-    onChange(selectedDays.join(', '));
-  }, [selectedDays, onChange]);
 
   return (
     <div data-testid="mute-timing-weekdays">

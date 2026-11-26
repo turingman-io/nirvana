@@ -4011,9 +4011,13 @@
       "saving": "Saving time interval"
     },
     "time-interval-form": {
+      "body-discard-changes": "The changes you made to this time interval have not been saved and will be lost.",
+      "confirm-discard-changes": "Discard changes",
       "description-unique-time-interval": "A unique name for the time interval",
+      "dismiss-discard-changes": "Keep editing",
       "error-save-time-interval": "Failed to save time interval",
       "text-loading-time-interval": "Loading time interval",
+      "title-discard-changes": "Discard unsaved changes?",
       "title-no-matching-time-interval-found": "No matching time interval found"
     },
     "time-intervals": {

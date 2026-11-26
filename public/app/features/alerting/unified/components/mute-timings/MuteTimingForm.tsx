@@ -1,10 +1,21 @@
 import { css } from '@emotion/css';
+import { type MouseEvent, useState } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 
 import { type GrafanaTheme2 } from '@grafana/data';
 import { Trans, t } from '@grafana/i18n';
 import { config, isFetchError, locationService } from '@grafana/runtime';
-import { Alert, Button, Field, FieldSet, Input, LinkButton, LoadingPlaceholder, useStyles2 } from '@grafana/ui';
+import {
+  Alert,
+  Button,
+  ConfirmModal,
+  Field,
+  FieldSet,
+  Input,
+  LinkButton,
+  LoadingPlaceholder,
+  useStyles2,
+} from '@grafana/ui';
 import { useAppNotification } from 'app/core/copy/appNotification';
 import {
   type MuteTiming,
@@ -73,6 +84,7 @@ const MuteTimingForm = ({ muteTiming, showError, loading, provenance, editMode }
   const defaultValues = useDefaultValues(muteTiming);
 
   const formApi = useForm({ defaultValues, values: defaultValues });
+  const [showDiscardModal, setShowDiscardModal] = useState(false);
 
   const updating = formApi.formState.isSubmitting;
 
@@ -107,6 +119,14 @@ const MuteTimingForm = ({ muteTiming, showError, loading, provenance, editMode }
           logError(new Error(title), isFetchError(error) ? { status: String(error.status) } : undefined);
         }
       }
+    }
+  };
+
+  const onCancel = (event: MouseEvent) => {
+    // Following the link would drop the edits, so check with the user first
+    if (formApi.formState.isDirty) {
+      event.preventDefault();
+      setShowDiscardModal(true);
     }
   };
 
@@ -173,12 +193,31 @@ const MuteTimingForm = ({ muteTiming, showError, loading, provenance, editMode }
                 <Trans i18nKey="alerting.time-interval.save">Save time interval</Trans>
               )}
             </Button>
-            <LinkButton type="button" variant="secondary" fill="outline" href={returnLink} disabled={updating}>
+            <LinkButton
+              type="button"
+              variant="secondary"
+              fill="outline"
+              href={returnLink}
+              disabled={updating}
+              onClick={onCancel}
+            >
               <Trans i18nKey="alerting.common.cancel">Cancel</Trans>
             </LinkButton>
           </FieldSet>
         </form>
       </FormProvider>
+      <ConfirmModal
+        isOpen={showDiscardModal}
+        title={t('alerting.time-interval-form.title-discard-changes', 'Discard unsaved changes?')}
+        body={t(
+          'alerting.time-interval-form.body-discard-changes',
+          'The changes you made to this time interval have not been saved and will be lost.'
+        )}
+        confirmText={t('alerting.time-interval-form.confirm-discard-changes', 'Discard changes')}
+        dismissText={t('alerting.time-interval-form.dismiss-discard-changes', 'Keep editing')}
+        onConfirm={() => locationService.push(returnLink)}
+        onDismiss={() => setShowDiscardModal(false)}
+      />
     </>
   );
 };
