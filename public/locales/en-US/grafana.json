@@ -14201,7 +14201,8 @@
     },
     "field-color": {
       "color-by-label": "Color series by",
-      "reverse-label": "Reverse colors"
+      "reverse-label": "Reverse colors",
+      "scheme-preview": "Color scheme preview"
     },
     "number-input": {
       "error-out-of-range": "Out of range. {{range}}",

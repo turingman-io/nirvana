@@ -257,6 +257,8 @@ The **Color scheme** options let you set single or multiple colors for your enti
 
 The color options and their effect on a visualization depend on the visualization you're working with and some visualizations have different color options.
 
+When the selected scheme has a fixed set of colors, such as a palette or a continuous color scheme, a preview of its colors is shown under the **Color scheme** picker. Palettes are previewed as one block per color and continuous schemes as a gradient, as in the list of schemes.
+
 Select one of the following schemes:
 
 | Color scheme                          | Description                                                                                                                                                                                                                                                                                                                                                                                                 |

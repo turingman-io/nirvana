@@ -1,5 +1,6 @@
-import { css } from '@emotion/css';
-import { type CSSProperties, type FC, type FormEvent } from 'react';
+import { css, cx } from '@emotion/css';
+import { memoize } from 'lodash';
+import { type FC, type FormEvent } from 'react';
 
 import {
   type StandardEditorProps,
@@ -24,9 +25,12 @@ import {
 import { useStyles2, useTheme2, Field, RadioButtonGroup, Select, Stack, Switch } from '@grafana/ui';
 
 import { ColorValueEditor } from './color';
+import { getColorSchemeBackground } from './colorSchemePreview';
 
 const GRADIENT_DEFAULT_FROM = '#73BF69';
 const GRADIENT_DEFAULT_TO = '#F2495C';
+
+const getPreviewBackground = memoize(getColorSchemeBackground);
 
 type Props = StandardEditorProps<FieldColor | undefined, FieldColorConfigSettings>;
 
@@ -41,6 +45,14 @@ export const FieldColorEditor = ({ value, onChange, item, id }: Props) => {
   const colorMode = getFieldColorMode(value?.mode);
   const canReverse = reverseColorSchemeEnabled && isReversibleFieldColorMode(colorMode);
   const reverse = canReverse && Boolean(value?.reverse);
+  const schemePreview = (
+    <FieldColorModeViz
+      mode={reverse ? getFieldColorMode(value?.mode, true) : colorMode}
+      theme={theme}
+      className={styles.schemePreview}
+      label={t('options-ui.field-color.scheme-preview', 'Color scheme preview')}
+    />
+  );
   const availableOptions = item.settings?.byValueSupport
     ? fieldColorModeRegistry.list()
     : fieldColorModeRegistry.list().filter((m) => !m.isByValue);
@@ -187,6 +199,7 @@ export const FieldColorEditor = ({ value, onChange, item, id }: Props) => {
       <>
         <div style={{ marginBottom: theme.spacing(2) }}>
           <Select minMenuHeight={200} options={options} value={mode} onChange={onModeChange} inputId={id} />
+          {schemePreview}
         </div>
         <Field label={t('options-ui.field-color.color-by-label', 'Color series by')}>
           <RadioButtonGroup value={value?.seriesBy ?? 'last'} options={seriesModes} onChange={onSeriesModeChange} />
@@ -201,56 +214,55 @@ export const FieldColorEditor = ({ value, onChange, item, id }: Props) => {
       <>
         <div style={{ marginBottom: theme.spacing(2) }}>
           <Select minMenuHeight={200} options={options} value={mode} onChange={onModeChange} inputId={id} />
+          {schemePreview}
         </div>
         {reverseSwitch}
       </>
     );
   }
 
-  return <Select minMenuHeight={200} options={options} value={mode} onChange={onModeChange} inputId={id} />;
+  return (
+    <>
+      <Select minMenuHeight={200} options={options} value={mode} onChange={onModeChange} inputId={id} />
+      {schemePreview}
+    </>
+  );
 };
 
 interface ModeProps {
   mode: FieldColorMode;
   theme: GrafanaTheme2;
+  className?: string;
+  label?: string;
 }
 
-const FieldColorModeViz: FC<ModeProps> = ({ mode, theme }) => {
-  if (!mode.getColors) {
+const FieldColorModeViz: FC<ModeProps> = ({ mode, theme, className, label }) => {
+  const styles = useStyles2(getVizStyles);
+  const background = getPreviewBackground(theme, mode);
+
+  if (!background) {
     return null;
   }
 
-  const colors = mode.getColors(theme).map(theme.visualization.getColorByName);
-  const style: CSSProperties = {
-    height: '8px',
-    width: '100%',
-    margin: '2px 0',
-    borderRadius: '3px',
-    opacity: 1,
-  };
-
-  if (mode.isContinuous) {
-    style.background = `linear-gradient(90deg, ${colors.join(',')})`;
-  } else {
-    let gradient = '';
-    let lastColor = '';
-
-    for (let i = 0; i < colors.length; i++) {
-      const color = colors[i];
-      if (gradient === '') {
-        gradient = `linear-gradient(90deg, ${color} 0%`;
-      } else {
-        const valuePercent = i / colors.length;
-        const pos = valuePercent * 100;
-        gradient += `, ${lastColor} ${pos}%, ${color} ${pos}%`;
-      }
-      lastColor = color;
-    }
-    style.background = gradient;
-  }
-
-  return <div style={style} />;
+  return (
+    <div
+      className={cx(styles.preview, className)}
+      style={{ background }}
+      role={label ? 'img' : undefined}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
+    />
+  );
 };
+
+const getVizStyles = (theme: GrafanaTheme2) => ({
+  preview: css({
+    height: theme.spacing(1),
+    width: '100%',
+    margin: theme.spacing(0.25, 0),
+    borderRadius: theme.shape.radius.default,
+  }),
+});
 
 const getStyles = (theme: GrafanaTheme2) => {
   return {
@@ -260,6 +272,9 @@ const getStyles = (theme: GrafanaTheme2) => {
     select: css({
       marginRight: theme.spacing(1),
       flexGrow: 1,
+    }),
+    schemePreview: css({
+      marginTop: theme.spacing(1),
     }),
   };
 };
