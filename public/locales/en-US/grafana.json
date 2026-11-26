@@ -7193,7 +7193,17 @@
       "undo": "Undo",
       "undo-action": "Undo: {{action}}",
       "unlink-library-panel": "Unlink library panel",
-      "unlink-library-panel-short": "Unlink"
+      "unlink-library-panel-short": "Unlink",
+      "unsaved-changes": {
+        "discard": "Discard changes",
+        "discard-body": "The dashboard goes back to its last saved version. You stay in edit mode.",
+        "discard-confirm": "Discard changes",
+        "discard-title": "Discard unsaved changes?",
+        "discard-tooltip": "Go back to the last saved version",
+        "label": "Unsaved changes",
+        "view": "View changes",
+        "view-tooltip": "Compare with the last saved version"
+      }
     },
     "transformation-editor": {
       "copy-input-data": "Copy input data to clipboard",
