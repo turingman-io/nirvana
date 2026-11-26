@@ -4,7 +4,7 @@ import { render, screen, waitFor } from 'test/test-utils';
 import { AppEvents } from '@grafana/data';
 import { appEvents } from 'app/core/app_events';
 import { contextSrv } from 'app/core/services/context_srv';
-import { type SilenceCreatePayload } from 'app/plugins/datasource/alertmanager/types';
+import { MatcherOperator, type SilenceCreatePayload } from 'app/plugins/datasource/alertmanager/types';
 import { AccessControlAction } from 'app/types/accessControl';
 
 import { setupMswServer } from '../../mockApi';
@@ -12,9 +12,11 @@ import { grantUserPermissions, mockAlertmanagerAlert, mockDataSource } from '../
 import { getAlertRuleHandler, mockK8sAlertRule } from '../../mocks/server/handlers/k8s/alertRules.k8s';
 import { AlertmanagerProvider } from '../../state/AlertmanagerContext';
 import { setupDataSources } from '../../testSetup/datasources';
+import { type MatcherFieldValue } from '../../types/silence-form';
 import { DataSourceType, GRAFANA_RULES_SOURCE_NAME } from '../../utils/datasource';
 
 import { SilencesEditor } from './SilencesEditor';
+import { getDefaultSilenceFormValues } from './utils';
 
 const RULE_UID = 'rule-uid-1';
 const RULE_TITLE = 'CPU usage high';
@@ -241,5 +243,70 @@ describe('SilencesEditor', () => {
     expect(captured.bodies).toHaveLength(2);
     const ruleUidMatchers = (captured.bodies[1]?.matchers ?? []).filter((m) => m.name === '__alert_rule_uid__');
     expect(ruleUidMatchers).toEqual([{ isEqual: true, isRegex: false, name: '__alert_rule_uid__', value: RULE_UID }]);
+  });
+});
+
+describe('SilencesEditor matchers that match empty labels', () => {
+  const matchesEmptyLabelsError = 'Add a matcher that requires a label value';
+  const severityNotCritical: MatcherFieldValue = {
+    name: 'severity',
+    operator: MatcherOperator.notEqual,
+    value: 'critical',
+  };
+
+  const renderWithMatchers = (matchers: MatcherFieldValue[], ruleUid?: string) => {
+    const onSilenceCreated = jest.fn();
+    const { user } = render(
+      <AlertmanagerProvider accessType="instance" alertmanagerSourceName={GRAFANA_RULES_SOURCE_NAME}>
+        <SilencesEditor
+          formValues={getDefaultSilenceFormValues({ matchers })}
+          alertManagerSourceName={GRAFANA_RULES_SOURCE_NAME}
+          onSilenceCreated={onSilenceCreated}
+          ruleUid={ruleUid}
+        />
+      </AlertmanagerProvider>
+    );
+
+    return { user, onSilenceCreated };
+  };
+
+  it('explains why the silence would be rejected and disables saving', async () => {
+    renderWithMatchers([severityNotCritical, { name: 'team', operator: MatcherOperator.regex, value: '.*' }]);
+
+    expect(await screen.findByText(matchesEmptyLabelsError)).toBeInTheDocument();
+    expect(saveButton()).toBeDisabled();
+  });
+
+  it('saves the silence when one of the matchers requires a label value', async () => {
+    const captured = captureCreateSilence();
+    const { user, onSilenceCreated } = renderWithMatchers([
+      severityNotCritical,
+      { name: 'alertname', operator: MatcherOperator.equal, value: 'HighCPUUsage' },
+    ]);
+
+    await user.click(saveButton());
+
+    await waitFor(() => expect(onSilenceCreated).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(matchesEmptyLabelsError)).not.toBeInTheDocument();
+    expect(captured.bodies[0].matchers).toEqual([
+      { isEqual: false, isRegex: false, name: 'severity', value: 'critical' },
+      { isEqual: true, isRegex: false, name: 'alertname', value: 'HighCPUUsage' },
+    ]);
+  });
+
+  it('does not apply to rule-scoped silences, which always match the rule UID', async () => {
+    server.use(getAlertRuleHandler([mockK8sAlertRule({ uid: RULE_UID, title: RULE_TITLE })]));
+    const captured = captureCreateSilence();
+    const { user, onSilenceCreated } = renderWithMatchers([severityNotCritical], RULE_UID);
+
+    expect(await findRuleField()).toHaveValue(RULE_TITLE);
+    await user.click(saveButton());
+
+    await waitFor(() => expect(onSilenceCreated).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(matchesEmptyLabelsError)).not.toBeInTheDocument();
+    expect(captured.bodies[0].matchers).toEqual([
+      { isEqual: false, isRegex: false, name: 'severity', value: 'critical' },
+      { isEqual: true, isRegex: false, name: '__alert_rule_uid__', value: RULE_UID },
+    ]);
   });
 });

@@ -1,6 +1,10 @@
 import { DefaultTimeZone, addDurationToDate, dateTime, intervalToAbbreviatedDurationString } from '@grafana/data';
-import { type SilenceFormFields } from 'app/features/alerting/unified/types/silence-form';
-import { matcherToMatcherField } from 'app/features/alerting/unified/utils/alertmanager';
+import { type MatcherFieldValue, type SilenceFormFields } from 'app/features/alerting/unified/types/silence-form';
+import {
+  labelsMatchMatchers,
+  matcherFieldToMatcher,
+  matcherToMatcherField,
+} from 'app/features/alerting/unified/utils/alertmanager';
 import { MATCHER_ALERT_RULE_UID } from 'app/features/alerting/unified/utils/constants';
 import { parseQueryParamMatchers } from 'app/features/alerting/unified/utils/matchers';
 import { MatcherOperator, type Silence } from 'app/plugins/datasource/alertmanager/types';
@@ -72,4 +76,15 @@ export const getDefaultSilenceFormValues = (partial?: Partial<SilenceFormFields>
     matchers: [{ name: '', value: '', operator: MatcherOperator.equal }],
     ...partial,
   };
+};
+
+/**
+ * Alertmanager rejects a silence when every one of its matchers also matches an empty label value,
+ * e.g. only `severity!=critical` or `team=~.*`, as it would apply to every alert without those labels.
+ * Rows without a label name haven't been filled in yet and are left to the required field check.
+ */
+export const everyMatcherMatchesEmptyValue = (matchers: MatcherFieldValue[]): boolean => {
+  const namedMatchers = matchers.filter((matcher) => matcher.name);
+
+  return namedMatchers.length > 0 && labelsMatchMatchers({}, namedMatchers.map(matcherFieldToMatcher));
 };

@@ -48,7 +48,7 @@ import { GrafanaAlertmanagerWarning } from '../GrafanaAlertmanagerWarning';
 import MatchersField from './MatchersField';
 import { SilencePeriod } from './SilencePeriod';
 import { SilencedInstancesPreview } from './SilencedInstancesPreview';
-import { getDefaultSilenceFormValues, getFormFieldsForSilence } from './utils';
+import { everyMatcherMatchesEmptyValue, getDefaultSilenceFormValues, getFormFieldsForSilence } from './utils';
 
 /**
  * Silences editor for editing an existing silence.
@@ -160,6 +160,7 @@ export const SilencesEditor = ({
   const { register, handleSubmit, formState, watch, setValue, clearErrors, getValues } = formAPI;
 
   const [duration, startsAt, endsAt, matchers] = watch(['duration', 'startsAt', 'endsAt', 'matchers']);
+  const [matchesEmptyLabels, setMatchesEmptyLabels] = useState(false);
 
   /** Default action taken after creation or cancellation, if corresponding method is not defined */
   const defaultHandler = () => {
@@ -221,6 +222,16 @@ export const SilencesEditor = ({
     },
     700,
     [clearErrors, duration, endsAt, prevDuration, setValue, startsAt]
+  );
+
+  // Rule-scoped silences always get the rule UID matcher on submit, so only general silences are checked.
+  // Waits for typing to pause, as a matcher whose value isn't typed yet (alertname="") matches empty labels too
+  useDebounce(
+    () => {
+      setMatchesEmptyLabels(!ruleUid && everyMatcherMatchesEmptyValue(matchers));
+    },
+    500,
+    [matchers, ruleUid]
   );
 
   const onLabelClick = ([value, name]: [string | undefined, string | undefined]): void => {
@@ -286,6 +297,21 @@ export const SilencesEditor = ({
           )}
 
           <MatchersField scopedToRule={Boolean(ruleUid)} />
+          {matchesEmptyLabels && (
+            <Alert
+              severity="error"
+              title={t(
+                'alerting.silences-editor.title-matchers-match-empty-labels',
+                'Add a matcher that requires a label value'
+              )}
+            >
+              <Trans i18nKey="alerting.silences-editor.body-matchers-match-empty-labels">
+                Each of these matchers also matches alerts that don&apos;t have the label, so this silence would apply
+                to almost every alert and Alertmanager won&apos;t accept it. Add at least one matcher that needs a label
+                value, for example alertname=HighCPUUsage.
+              </Trans>
+            </Alert>
+          )}
 
           <Field
             label={t('alerting.silences-editor.label-comment', 'Comment')}
@@ -339,7 +365,7 @@ export const SilencesEditor = ({
             </Button>
           )}
           {!isLoading && (
-            <Button type="submit">
+            <Button type="submit" disabled={matchesEmptyLabels}>
               <Trans i18nKey="alerting.silences-editor.save-silence">Save silence</Trans>
             </Button>
           )}
