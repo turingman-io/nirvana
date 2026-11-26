@@ -89,4 +89,59 @@ describe('FacetedLabelsFilter', () => {
     const { container: normal } = renderFilter({ dimmed: false });
     expect((dimmed.firstChild as HTMLElement).className).not.toBe((normal.firstChild as HTMLElement).className);
   });
+
+  describe('search', () => {
+    const getSearchInput = () => screen.getByPlaceholderText('Search');
+
+    it('narrows names and label values to the ones that match', async () => {
+      renderFilter();
+      await userEvent.type(getSearchInput(), 'mem');
+
+      expect(screen.getByLabelText('mem')).toBeInTheDocument();
+      expect(screen.queryByLabelText('cpu')).not.toBeInTheDocument();
+      expect(screen.queryByText('By labels')).not.toBeInTheDocument();
+
+      await userEvent.clear(getSearchInput());
+      expect(screen.getByLabelText('cpu')).toBeInTheDocument();
+      expect(screen.getByText('By labels')).toBeInTheDocument();
+    });
+
+    it('opens label groups that have matching values', async () => {
+      renderFilter();
+      await userEvent.type(getSearchInput(), 'EU');
+
+      expect(screen.getByLabelText('eu')).toBeInTheDocument();
+      expect(screen.queryByLabelText('us')).not.toBeInTheDocument();
+      expect(screen.queryByText('host')).not.toBeInTheDocument();
+      expect(screen.queryByText('By name')).not.toBeInTheDocument();
+    });
+
+    it('accepts regular expressions with RE2-style flags', async () => {
+      renderFilter();
+
+      await userEvent.type(getSearchInput(), '^c.u$');
+      expect(screen.getByLabelText('cpu')).toBeInTheDocument();
+      expect(screen.queryByLabelText('mem')).not.toBeInTheDocument();
+
+      await userEvent.clear(getSearchInput());
+      await userEvent.type(getSearchInput(), '(?-i)CPU');
+      expect(screen.getByText('No matching names or values')).toBeInTheDocument();
+    });
+
+    it('matches a search that is not a valid regular expression as plain text', async () => {
+      renderFilter({ labels: { [FIELD_NAME_FACET_KEY]: ['cpu (avg)', 'mem'] } });
+      await userEvent.type(getSearchInput(), 'cpu (');
+
+      expect(screen.getByLabelText('cpu (avg)')).toBeInTheDocument();
+      expect(screen.queryByLabelText('mem')).not.toBeInTheDocument();
+    });
+
+    it('only adds the matching values with select all', async () => {
+      const { onChange } = renderFilter({ selected: { [FIELD_NAME_FACET_KEY]: ['cpu'] } });
+      await userEvent.type(getSearchInput(), 'mem');
+      await userEvent.click(screen.getByText('Select all', { selector: 'button' }));
+
+      expect(onChange).toHaveBeenCalledWith({ [FIELD_NAME_FACET_KEY]: ['cpu', 'mem'] });
+    });
+  });
 });
