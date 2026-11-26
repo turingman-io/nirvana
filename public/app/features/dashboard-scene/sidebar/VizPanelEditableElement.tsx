@@ -16,6 +16,7 @@ import {
   PanelBackgroundSwitch,
   PanelDescriptionTextArea,
   PanelFrameTitleInput,
+  PanelTimeRangeSubtitleSwitch,
 } from '../panel-edit/getPanelFrameOptions';
 import { AutoGridItem } from '../scene/layout-auto-grid/AutoGridItem';
 import { DashboardGridItem } from '../scene/layout-default/DashboardGridItem';
@@ -37,6 +38,7 @@ function useSidebarOptions(this: VizPanelEditableElement, isNewElement: boolean)
   const layoutElement = panel.parent!;
   const titleId = useId();
   const descriptionId = useId();
+  const timeRangeId = useId();
   const backgroundId = useId();
 
   const panelOptions = useMemo(() => {
@@ -63,12 +65,23 @@ function useSidebarOptions(this: VizPanelEditableElement, isNewElement: boolean)
       )
       .addItem(
         new OptionsPaneItemDescriptor({
+          title: t('dashboard.sidebar.viz-panel.options.time-range-subtitle', 'Show time range'),
+          id: timeRangeId,
+          description: t(
+            'dashboard.sidebar.viz-panel.options.time-range-subtitle-description',
+            "Show the panel's time range below the title"
+          ),
+          render: (descriptor) => <PanelTimeRangeSubtitleSwitch id={descriptor.props.id} panel={panel} />,
+        })
+      )
+      .addItem(
+        new OptionsPaneItemDescriptor({
           title: t('dashboard.sidebar.viz-panel.options.transparent-background', 'Transparent background'),
           id: backgroundId,
           render: (descriptor) => <PanelBackgroundSwitch id={descriptor.props.id} panel={panel} />,
         })
       );
-  }, [titleId, panel, descriptionId, backgroundId, isNewElement]);
+  }, [titleId, panel, descriptionId, timeRangeId, backgroundId, isNewElement]);
 
   // Some layout options depend on plugin capabilities (e.g. content-fit), and
   // plugins load async — subscribe so the categories rebuild once loaded.
