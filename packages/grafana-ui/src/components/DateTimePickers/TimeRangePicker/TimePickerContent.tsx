@@ -315,6 +315,7 @@ const getStyles = (
   isFullscreen?: boolean
 ) => {
   const visualRefreshEnabled = theme.flags.visualDesignRefresh;
+  const scrollFade = getScrollFadeStyles(theme);
   return {
     container: css({
       background: theme.colors.background.elevated,
@@ -340,6 +341,7 @@ const getStyles = (
       overflow: 'auto',
       scrollbarWidth: 'thin',
       order: isReversed ? 1 : 0,
+      ...scrollFade,
     }),
     rightSide: css({
       width: `${isFullscreen ? '40%' : '100%'}; !important`,
@@ -356,7 +358,21 @@ const getStyles = (
     scrollContent: css({
       overflowY: 'auto',
       scrollbarWidth: 'thin',
+      ...scrollFade,
     }),
+  };
+};
+
+/**
+ * Fades out the bottom edge of a scrolling pane, so it's clear that the list continues below.
+ * The matching bottom padding lets the last item scroll clear of the fade.
+ */
+const getScrollFadeStyles = (theme: GrafanaTheme2) => {
+  const fadeSize = theme.spacing(2);
+
+  return {
+    maskImage: `linear-gradient(to bottom, black calc(100% - ${fadeSize}), transparent)`,
+    paddingBottom: fadeSize,
   };
 };
 
