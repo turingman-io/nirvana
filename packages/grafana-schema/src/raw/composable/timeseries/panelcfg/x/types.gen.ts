@@ -14,6 +14,12 @@ import * as common from '@grafana/schema';
 
 export const pluginVersion = "13.4.0-pre";
 
+export enum EndLabelsMode {
+  Name = 'name',
+  Off = 'off',
+  Value = 'value',
+}
+
 export interface TimeSeriesLegendOptions extends common.VizLegendOptions {
   enableFacetedFilter?: boolean;
   facetedFilterPinned?: boolean;
@@ -26,6 +32,7 @@ export const defaultTimeSeriesLegendOptions: Partial<TimeSeriesLegendOptions> = 
 
 export interface Options extends common.OptionsWithTimezones, common.OptionsWithAnnotations {
   disableKeyboardEvents?: boolean;
+  endLabels?: EndLabelsMode;
   legend: TimeSeriesLegendOptions;
   orientation?: common.VizOrientation;
   timeCompare?: common.TimeCompareOptions;
