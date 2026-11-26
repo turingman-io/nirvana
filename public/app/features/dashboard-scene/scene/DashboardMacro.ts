@@ -4,6 +4,7 @@ import { type FormatVariable, type SceneObject, sceneUtils } from '@grafana/scen
 import { getDashboardSceneFor } from '../utils/utils';
 
 import { DashboardTabStateMacro } from './DashboardTabStateMacro';
+import { TimeRangeMacro } from './TimeRangeMacro';
 
 /**
  * Handles expressions like ${__dashboard.uid}
@@ -40,10 +41,12 @@ export function registerDashboardMacro() {
   try {
     const unregisterDashboard = sceneUtils.registerVariableMacro('__dashboard', DashboardMacro);
     const unregisterTabState = sceneUtils.registerVariableMacro(DataLinkBuiltInVars.keepTabs, DashboardTabStateMacro);
+    const unregisterTimeRange = sceneUtils.registerVariableMacro('__time_range', TimeRangeMacro);
 
     return () => {
       unregisterDashboard();
       unregisterTabState();
+      unregisterTimeRange();
     };
   } catch (e) {
     console.error('Error registering dashboard macro', e);

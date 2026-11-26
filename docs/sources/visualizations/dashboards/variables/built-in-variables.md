@@ -165,6 +165,14 @@ It's used in several places, including:
 - SQL queries in MySQL, Postgres, and MSSQL.
 - The `$__timeFilter` variable is used in the MySQL data source.
 
+## `$__time_range`
+
+The `$__time_range` variable returns the active time range the way the time picker shows it, for example `Last 6 hours`, `Yesterday`, or `2024-01-01 00:00:00 to 2024-01-02 12:00:00` for an absolute time range.
+
+It's intended for panel and row titles. For example, a row titled `Errors (${__time_range})` reads `Errors (Last 6 hours)` and follows the time picker when you change the time range.
+
+In a panel with a relative time or time shift override, the variable returns the panel's time range.
+
 ## `$__timezone`
 
 The `$__timezone` variable returns the active time zone selection, either `utc` or an entry from the IANA time zone database, such as `America/New_York`.
