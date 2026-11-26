@@ -16,6 +16,7 @@ import { isFullDashboardEditing } from '../types/dashboard';
 
 import { RowHeader } from './RowHeader';
 import { type RowItem } from './RowItem';
+import { RowLayoutReveal } from './RowLayoutReveal';
 
 interface Props {
   model: RowItem;
@@ -58,6 +59,12 @@ export function RowContainer({
   const onHeaderEnter = useCallback(() => setSelectableHighlight(true), []);
   const onHeaderLeave = useCallback(() => setSelectableHighlight(false), []);
   const containerRef = useMergeRefs([dragProvided.innerRef, model.containerRef]);
+
+  // Only rows the user expands get the reveal transition, not rows that are open when the dashboard loads.
+  const [revealOnExpand, setRevealOnExpand] = useState(isCollapsed);
+  if (isCollapsed && !revealOnExpand) {
+    setRevealOnExpand(true);
+  }
 
   return (
     <div
@@ -108,7 +115,8 @@ export function RowContainer({
         />
       )}
       {!isCollapsed && (
-        <div
+        <RowLayoutReveal
+          animate={revealOnExpand}
           className={cx(styles.rowLayoutWrapper, (!isHeaderHidden || isEditing) && styles.rowLayoutIndented)}
           id={contentId}
         >
@@ -116,7 +124,7 @@ export function RowContainer({
             <DashboardControlsExtensionPoint section={model} />
           </SectionControlsRow>
           <layout.Component model={layout} />
-        </div>
+        </RowLayoutReveal>
       )}
       {conditionalRenderingOverlay}
     </div>

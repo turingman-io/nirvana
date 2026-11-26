@@ -111,6 +111,21 @@ describe('RowItemRenderer', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
   });
 
+  it('renders the content the toggle controls once a collapsed row is expanded', async () => {
+    const { row } = renderRow({ collapse: true });
+    const toggle = screen.getByTestId(selectors.components.DashboardRow.toggle(row.state.title!));
+    const contentId = toggle.getAttribute('aria-controls')!;
+    expect(document.getElementById(contentId)).not.toBeInTheDocument();
+
+    await userEvent.click(toggle);
+
+    expect(document.getElementById(contentId)).toBeInTheDocument();
+
+    await userEvent.click(toggle);
+
+    expect(document.getElementById(contentId)).not.toBeInTheDocument();
+  });
+
   it('records collapsing the row in undo history while editing', async () => {
     const { row, scene } = renderRow({ collapse: false, isEditing: true });
     const deactivateSidebar = scene.state.sidebar.activate();
