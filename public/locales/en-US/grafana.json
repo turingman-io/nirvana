@@ -6675,7 +6675,8 @@
         "row": {
           "fill-screen": "Fill screen",
           "hide-header": "Hide row header",
-          "title": "Title"
+          "title": "Title",
+          "title-description": "Can include variables, for example $__time_range"
         },
         "section-annotations": {
           "title": "Annotations"

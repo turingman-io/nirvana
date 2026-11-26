@@ -206,6 +206,10 @@ function RowTitleInput({ row, isNewElement }: { row: RowItem; isNewElement: bool
   return (
     <Field
       label={t('dashboard.rows-layout.row-options.row.title', 'Title')}
+      description={t(
+        'dashboard.rows-layout.row-options.row.title-description',
+        'Can include variables, for example $__time_range'
+      )}
       invalid={!hasUniqueTitle}
       error={
         !hasUniqueTitle ? t('dashboard.rows-layout.row-options.title-not-unique', 'Title should be unique') : undefined

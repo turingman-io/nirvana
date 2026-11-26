@@ -72,6 +72,7 @@ export class RowItem
 
   protected _variableDependency = new VariableDependencyConfig(this, {
     statePaths: ['title'],
+    handleTimeMacros: true,
   });
 
   public readonly isEditableDashboardElement = true;
