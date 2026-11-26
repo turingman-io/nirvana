@@ -8004,6 +8004,12 @@
       "target-path-label": "Target path",
       "title-this-repository-is-read-only": "This repository is read only"
     },
+    "new-folder-button": {
+      "create-error": "Failed to create folder",
+      "create-success": "Folder created",
+      "label": "New folder",
+      "title": "New folder"
+    },
     "on-open-snapshot-original-dashboard": {
       "confirmText": {
         "proceed": "Proceed"

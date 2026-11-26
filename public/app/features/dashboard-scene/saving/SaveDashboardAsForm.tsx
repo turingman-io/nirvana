@@ -11,6 +11,7 @@ import { validationSrv } from 'app/features/manage-dashboards/services/Validatio
 import { type DashboardScene } from '../scene/DashboardScene';
 
 import { FolderDescription } from './FolderDescription';
+import { NewFolderButton } from './NewFolderButton';
 import { type SaveDashboardDrawer } from './SaveDashboardDrawer';
 import { getSaveDashboardErrorInfo } from './saveErrors';
 import {
@@ -235,7 +236,7 @@ export function SaveDashboardAsForm({ dashboard, changeInfo, drawer, isHeld }: P
         </Field>
 
         <Stack direction="column" gap={1}>
-          <Field noMargin label={t('dashboard-scene.save-dashboard-as-form.label-folder', 'Folder')}>
+          <Field noMargin label={<FolderFieldLabel disabled={state.loading} onFolderCreated={onFolderChange} />}>
             <FolderPicker
               onChange={onFolderChange}
               value={formValues.folder?.uid}
@@ -280,6 +281,22 @@ function DescriptionLabel(props: DescriptionLabelProps) {
       <Label htmlFor="description">
         <Trans i18nKey="dashboard-scene.description-label.description">Description</Trans>
       </Label>
+    </Stack>
+  );
+}
+
+interface FolderFieldLabelProps {
+  disabled?: boolean;
+  onFolderCreated: (uid: string, title: string) => void;
+}
+
+function FolderFieldLabel({ disabled, onFolderCreated }: FolderFieldLabelProps) {
+  return (
+    <Stack justifyContent="space-between" alignItems="center">
+      <Label>
+        <Trans i18nKey="dashboard-scene.save-dashboard-as-form.label-folder">Folder</Trans>
+      </Label>
+      <NewFolderButton disabled={disabled} onFolderCreated={onFolderCreated} />
     </Stack>
   );
 }
