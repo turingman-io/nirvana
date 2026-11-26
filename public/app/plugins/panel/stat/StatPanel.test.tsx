@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 
 import {
   type DataFrame,
+  dateTimeFormat,
   type FieldConfigSource,
   FieldType,
   LoadingState,
@@ -141,6 +142,26 @@ describe('StatPanel', () => {
     expect(screen.getByText('30')).toBeInTheDocument();
     // diffperc of [10, 20, 30] is (30 - 10) / 10 = 200%
     expect(screen.getByText('200%')).toBeInTheDocument();
+  });
+
+  it('shows when the value was last updated', () => {
+    const frame = toDataFrame({
+      fields: [
+        { name: 'time', type: FieldType.time, values: [1, 2, 3], config: {} },
+        { name: 'value', type: FieldType.number, values: [10, 20, null], config: {} },
+      ],
+    });
+
+    renderStatPanel({ showLastUpdated: true }, { series: [frame] });
+
+    // the last non-null value is at time 2
+    expect(screen.getByText(`Last updated ${dateTimeFormat(2, { timeZone: 'utc' })}`)).toBeInTheDocument();
+  });
+
+  it('does not show when the value was last updated by default', () => {
+    renderStatPanel(undefined, { series: [createTimeSeriesFrame()] });
+
+    expect(screen.queryByText(/Last updated/)).not.toBeInTheDocument();
   });
 
   it('renders each row when reduceOptions.values is true', () => {

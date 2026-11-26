@@ -2,6 +2,7 @@ import { isNumber } from 'lodash';
 import { memo, useCallback, type JSX } from 'react';
 
 import {
+  dateTimeFormat,
   type DisplayValueAlignmentFactors,
   type FieldDisplay,
   FieldType,
@@ -9,13 +10,16 @@ import {
   getFieldDisplayValues,
   type NumericRange,
   type PanelProps,
+  type TimeZone,
 } from '@grafana/data';
 import { findNumericFieldMinMax } from '@grafana/data/internal';
+import { t } from '@grafana/i18n';
 import { BigValueTextMode, BigValueGraphMode } from '@grafana/schema';
 import { BigValue, DataLinksContextMenu, useTheme2, VizRepeater, type VizRepeaterRenderValueProps } from '@grafana/ui';
 import { type DataLinksContextMenuApi } from '@grafana/ui/internal';
 
 import { type Options } from './panelcfg.gen';
+import { getLastUpdatedTime } from './utils';
 
 export const StatPanel = memo(
   ({
@@ -71,10 +75,11 @@ export const StatPanel = memo(
             className={targetClassName}
             disableWideLayout={!options.wideLayout}
             percentChangeColorMode={options.percentChangeColorMode}
+            caption={options.showLastUpdated ? getLastUpdatedCaption(value, timeZone) : undefined}
           />
         );
       },
-      [theme, timeRange, options, getTextMode]
+      [theme, timeRange, timeZone, options, getTextMode]
     );
 
     const renderValue = useCallback(
@@ -149,3 +154,16 @@ export const StatPanel = memo(
   }
 );
 StatPanel.displayName = 'StatPanel';
+
+function getLastUpdatedCaption(value: FieldDisplay, timeZone?: TimeZone): string | undefined {
+  const time = getLastUpdatedTime(value);
+
+  if (time == null) {
+    return undefined;
+  }
+
+  return t('stat.last-updated', 'Last updated {{time}}', {
+    time: dateTimeFormat(time, { timeZone }),
+    interpolation: { escapeValue: false },
+  });
+}

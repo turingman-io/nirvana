@@ -5,7 +5,7 @@ import { clearButtonStyles } from '../Button/StyledButton.styles';
 import { FormattedValueDisplay } from '../FormattedValueDisplay/FormattedValueDisplay';
 
 import { buildLayout } from './BigValueLayout';
-import { BigValueJustifyMode, type Props } from './BigValueTypes';
+import { BigValueJustifyMode, BigValueTextMode, type Props } from './BigValueTypes';
 import { PercentChange } from './PercentChange';
 
 /**
@@ -14,7 +14,15 @@ import { PercentChange } from './PercentChange';
  * https://developers.grafana.com/ui/latest/index.html?path=/docs/plugins-bigvalue--docs
  */
 export const BigValue = memo<Props>((props) => {
-  const { onClick, className, hasLinks, theme, justifyMode = BigValueJustifyMode.Auto } = props;
+  const {
+    onClick,
+    className,
+    hasLinks,
+    theme,
+    caption,
+    justifyMode = BigValueJustifyMode.Auto,
+    textMode = BigValueTextMode.Auto,
+  } = props;
 
   const layout = buildLayout({ ...props, justifyMode });
   const panelStyles = layout.getPanelStyles();
@@ -25,6 +33,7 @@ export const BigValue = memo<Props>((props) => {
   const percentChange = props.value.percentChange;
   const percentChangeColorMode = props.percentChangeColorMode;
   const showPercentChange = percentChange != null && !Number.isNaN(percentChange);
+  const showCaption = Boolean(caption) && textMode !== BigValueTextMode.None;
 
   // When there is an outer data link this tooltip will override the outer native tooltip
   const tooltip = hasLinks ? undefined : textValues.tooltip;
@@ -41,6 +50,7 @@ export const BigValue = memo<Props>((props) => {
               styles={layout.getPercentChangeStyles(percentChange, percentChangeColorMode, valueStyles)}
             />
           )}
+          {showCaption && <div style={layout.getCaptionStyles()}>{caption}</div>}
         </div>
         {layout.renderChart()}
       </div>
@@ -58,6 +68,7 @@ export const BigValue = memo<Props>((props) => {
       <div style={valueAndTitleContainerStyles}>
         {textValues.title && <div style={titleStyles}>{textValues.title}</div>}
         <FormattedValueDisplay value={textValues} style={valueStyles} />
+        {showCaption && <div style={layout.getCaptionStyles()}>{caption}</div>}
       </div>
       {layout.renderChart()}
     </button>

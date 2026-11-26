@@ -134,6 +134,17 @@ export const plugin = new PanelPlugin<Options>(StatPanel)
           ],
         },
         showIf: (config) => config.showPercentChange,
+      })
+      .addBooleanSwitch({
+        path: 'showLastUpdated',
+        name: t('stat.name-show-last-updated', 'Show last updated'),
+        description: t(
+          'stat.description-show-last-updated',
+          'Show the time of the most recent data point under each value'
+        ),
+        defaultValue: defaultOptions.showLastUpdated,
+        category: mainCategory,
+        showIf: (config) => config.textMode !== BigValueTextMode.None,
       });
   })
   .setNoPadding()
