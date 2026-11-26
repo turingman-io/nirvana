@@ -3784,6 +3784,7 @@
     },
     "silences-editor": {
       "alert-rule-unavailable": "Alert rule unavailable",
+      "body-matchers-match-empty-labels": "Each of these matchers also matches alerts that don't have the label, so this silence would apply to almost every alert and Alertmanager won't accept it. Add at least one matcher that needs a label value, for example alertname=HighCPUUsage.",
       "comment-placeholder-details-about-the-silence": "Details about the silence",
       "description-alert-rule-scope": "This silence applies only to alerts from this alert rule.",
       "description-alert-rule-unavailable": "This silence applies only to alerts from the alert rule with UID {{ruleUid}}. The rule may have been deleted, or you may not have permission to view it.",
@@ -3796,7 +3797,8 @@
       },
       "placeholder-whos-creating-the-silence": "Who's creating the silence",
       "save-silence": "Save silence",
-      "saving": "Saving..."
+      "saving": "Saving...",
+      "title-matchers-match-empty-labels": "Add a matcher that requires a label value"
     },
     "silences-table": {
       "label-section-expired": "Expired silences ({{numExpired}})",
