@@ -245,6 +245,13 @@ The options under the **Graph styles** section let you control the general appea
 
 {{< docs/shared lookup="visualizations/graph-styles-options.md" source="grafana" version="<GRAFANA_VERSION>" >}}
 
+#### Last value line
+
+Toggle the **Last value line** switch on to draw a dashed line across the graph at the last value of each visible series, in the series color.
+The value itself is shown in a tag at the right edge of the graph, just above the line. Tags of series that end at a similar value are stacked so they don't overlap.
+
+The line and the tag are drawn beneath the series, like the grid, so they never hide data. Use them to compare the current value with the rest of the time range at a glance.
+
 ### Standard options
 
 {{< docs/shared lookup="visualizations/standard-options.md" source="grafana" version="<GRAFANA_VERSION>" >}}

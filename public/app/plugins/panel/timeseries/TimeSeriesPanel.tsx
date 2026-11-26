@@ -30,6 +30,7 @@ import { TimeSeriesTooltip } from './TimeSeriesTooltip';
 import { type Options } from './panelcfg.gen';
 import { AnnotationsPlugin } from './plugins/AnnotationsPlugin';
 import { ExemplarsPlugin, getVisibleLabels } from './plugins/ExemplarsPlugin';
+import { LastValueLinePlugin } from './plugins/LastValueLinePlugin';
 import { OutsideRangePlugin } from './plugins/OutsideRangePlugin';
 import { getXAnnotationFrames } from './plugins/utils';
 import { getPrepareTimeseriesSuggestion } from './suggestions';
@@ -246,6 +247,7 @@ export const TimeSeriesPanel = ({
                   setNewRange={setNewAnnotationRange}
                 />
                 <OutsideRangePlugin config={uplotConfig} onChangeTimeRange={onChangeTimeRange} />
+                {options.lastValueLine && <LastValueLinePlugin config={uplotConfig} frame={alignedFrame} />}
                 <ExemplarsPlugin
                   openExemplar={openExemplar}
                   visibleSeries={getVisibleExemplarLabels(uplotConfig, frames)}

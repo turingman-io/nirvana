@@ -26,6 +26,7 @@ export const defaultTimeSeriesLegendOptions: Partial<TimeSeriesLegendOptions> = 
 
 export interface Options extends common.OptionsWithTimezones, common.OptionsWithAnnotations {
   disableKeyboardEvents?: boolean;
+  lastValueLine?: boolean;
   legend: TimeSeriesLegendOptions;
   orientation?: common.VizOrientation;
   timeCompare?: common.TimeCompareOptions;

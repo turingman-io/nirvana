@@ -42,6 +42,17 @@ export const plugin = new PanelPlugin<Options, FieldConfig>(TimeSeriesPanel)
     });
 
     addAnnotationOptions(builder);
+
+    builder.addBooleanSwitch({
+      path: 'lastValueLine',
+      name: t('timeseries.name-last-value-line', 'Last value line'),
+      category: [t('timeseries.config.get-graph-field-config.category-graph-styles', 'Graph styles')],
+      description: t(
+        'timeseries.description-last-value-line',
+        'Draw a dashed line at the last value of each series, with the value at the right edge of the graph'
+      ),
+      defaultValue: false,
+    });
   })
   .setSuggestionsSupplier(timeseriesSuggestionsSupplier)
   .setPresetsSupplier(timeseriesPresetsSupplier)
