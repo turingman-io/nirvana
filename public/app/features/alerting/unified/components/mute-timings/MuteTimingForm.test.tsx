@@ -1,5 +1,6 @@
 import { render, screen } from 'test/test-utils';
 
+import { locationService } from '@grafana/runtime';
 import { setupMswServer } from 'app/features/alerting/unified/mockApi';
 import { grantUserPermissions } from 'app/features/alerting/unified/mocks';
 import { AlertmanagerProvider } from 'app/features/alerting/unified/state/AlertmanagerContext';
@@ -99,5 +100,37 @@ describe('MuteTimingForm', () => {
 
     const nameInput = await screen.findByTestId('mute-timing-name');
     expect(nameInput).toBeEnabled();
+  });
+
+  describe('cancelling with unsaved changes', () => {
+    const cancelButton = () => screen.getByRole('link', { name: /cancel/i });
+
+    it('asks before discarding a newly added time interval item and keeps it when the user keeps editing', async () => {
+      const { user } = render(
+        <AlertmanagerProvider accessType={'notification'} alertmanagerSourceName={GRAFANA_RULES_SOURCE_NAME}>
+          <MuteTimingForm />
+        </AlertmanagerProvider>
+      );
+
+      await user.click(await screen.findByRole('button', { name: /add another time interval item/i }));
+      await user.click(cancelButton());
+
+      expect(await screen.findByText('Discard unsaved changes?')).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Keep editing' }));
+
+      expect(screen.queryByText('Discard unsaved changes?')).not.toBeInTheDocument();
+      expect(screen.getAllByTestId('mute-timing-days')).toHaveLength(2);
+    });
+
+    it('goes back to the time intervals when the changes are discarded', async () => {
+      const { user } = renderWithProvider('none', true);
+
+      await user.click(await screen.findByRole('button', { name: /remove time interval/i }));
+      await user.click(cancelButton());
+      await user.click(await screen.findByRole('button', { name: 'Discard changes' }));
+
+      expect(locationService.getLocation().pathname).toMatch(/^\/alerting\/routes/);
+    });
   });
 });
