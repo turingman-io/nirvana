@@ -22,6 +22,12 @@ import { getDashboardSceneFor } from '../utils/utils';
 
 import { PanelStylesSection } from './PanelStylesSection';
 
+/**
+ * Subtitle that shows the panel's time range. The time macros resolve against the panel's own time range, so
+ * relative time and time shift overrides are included, and are formatted in the dashboard time zone.
+ */
+export const PANEL_TIME_RANGE_SUBTITLE = '${__from:text} to ${__to:text}';
+
 export function createPresetApplyHandler(panel: VizPanel) {
   return function onApplyPreset(preset: PanelPluginVisualizationSuggestion, prevFieldConfig: FieldConfigSource) {
     const prevOptions = panel.state.options;
@@ -100,6 +106,19 @@ export function getPanelFrameOptions(panel: VizPanel): OptionsPaneCategoryDescri
         skipField: true,
         render: function renderDescription(descriptor) {
           return <PanelDescriptionTextArea id={descriptor.props.id} panel={panel} />;
+        },
+      })
+    )
+    .addItem(
+      new OptionsPaneItemDescriptor({
+        title: t('dashboard-scene.get-panel-frame-options.title.time-range-subtitle', 'Show time range'),
+        id: 'panel-frame-options-time-range-subtitle',
+        description: t(
+          'dashboard-scene.get-panel-frame-options.description.time-range-subtitle',
+          "Show the panel's time range below the title"
+        ),
+        render: function renderTimeRangeSubtitle(descriptor) {
+          return <PanelTimeRangeSubtitleSwitch id={descriptor.props.id} panel={panel} />;
         },
       })
     )
@@ -202,7 +221,10 @@ export function PanelFrameTitleInput({
 }
 
 export function PanelDescriptionTextArea({ panel, id }: { panel: VizPanel; id?: string }) {
-  const { description, subtitle } = panel.useState();
+  const { description, subtitle: panelSubtitle } = panel.useState();
+  // The subtitle shows either the description or the panel's time range
+  const showsTimeRange = panelSubtitle === PANEL_TIME_RANGE_SUBTITLE;
+  const subtitle = showsTimeRange ? undefined : panelSubtitle;
   const value = description ?? subtitle ?? '';
   const [prevValue, setPrevValue] = React.useState(value);
   // Default to description for now
@@ -267,6 +289,7 @@ export function PanelDescriptionTextArea({ panel, id }: { panel: VizPanel; id?: 
         <Switch
           value={!!subtitle}
           id="panel-subtitle-switch"
+          disabled={showsTimeRange}
           onChange={onToggleSubtitle}
           label={t('dashboard.viz-panel.options.description-as-subtitle', 'Use as subtitle')}
         />
@@ -291,6 +314,25 @@ export function PanelDescriptionTextArea({ panel, id }: { panel: VizPanel; id?: 
       </Field>
     </>
   );
+}
+
+export function PanelTimeRangeSubtitleSwitch({ panel, id }: { panel: VizPanel; id?: string }) {
+  const { subtitle } = panel.useState();
+  const showsTimeRange = subtitle === PANEL_TIME_RANGE_SUBTITLE;
+
+  const onChange = () => {
+    edit({
+      meta: { actionId: 'panel.toggleTimeRangeSubtitle' },
+      description: t('dashboard.edit-actions.panel-time-range-subtitle', 'panel time range change'),
+      source: panel,
+      perform: () => panel.setState({ subtitle: showsTimeRange ? undefined : PANEL_TIME_RANGE_SUBTITLE }),
+      undo: () => panel.setState({ subtitle }),
+    });
+    trackPanelSettingChange(panel, 'toggle_panel_time_range');
+  };
+
+  // Not available while the description is used as the subtitle
+  return <Switch value={showsTimeRange} id={id} disabled={!!subtitle && !showsTimeRange} onChange={onChange} />;
 }
 
 export function PanelBackgroundSwitch({ panel, id }: { panel: VizPanel; id?: string }) {

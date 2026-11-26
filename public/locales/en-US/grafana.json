@@ -6215,6 +6215,7 @@
       "panel-preset": "Apply panel preset",
       "panel-repeat-direction": "Repeat direction",
       "panel-repeat-variable": "Panel repeat by",
+      "panel-time-range-subtitle": "panel time range change",
       "panel-title": "panel title change",
       "paste-panel": "Paste panel",
       "paste-panel-styles": "Paste panel styles",
@@ -7047,6 +7048,8 @@
         "options": {
           "configure-button-tooltip": "Edit queries and visualization options",
           "description": "Description",
+          "time-range-subtitle": "Show time range",
+          "time-range-subtitle-description": "Show the panel's time range below the title",
           "title-option": "Title",
           "transparent-background": "Transparent background"
         }
@@ -7821,6 +7824,9 @@
       }
     },
     "get-panel-frame-options": {
+      "description": {
+        "time-range-subtitle": "Show the panel's time range below the title"
+      },
       "descriptor": {
         "title": {
           "panel-options": "Panel options"
@@ -7830,6 +7836,7 @@
         "description": "Description",
         "panel-links": "Panel links",
         "panel-styles": "Panel styles",
+        "time-range-subtitle": "Show time range",
         "title": "Title",
         "transparent-background": "Transparent background"
       }

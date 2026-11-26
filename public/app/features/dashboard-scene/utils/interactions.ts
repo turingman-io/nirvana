@@ -546,6 +546,7 @@ export type PanelSettingItem =
   | 'change_panel_title'
   | 'change_panel_description'
   | 'toggle_panel_subtitle'
+  | 'toggle_panel_time_range'
   | 'change_panel_background'
   | 'change_panel_repeat'
   | 'change_panel_repeat_direction'
