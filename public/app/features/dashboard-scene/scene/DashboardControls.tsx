@@ -55,6 +55,7 @@ import { EditDashboardSwitch } from './new-toolbar/actions/EditDashboardSwitch';
 import { MakeDashboardEditableButton } from './new-toolbar/actions/MakeDashboardEditableButton';
 import { SaveDashboard } from './new-toolbar/actions/SaveDashboard';
 import { ShareDashboardButton } from './new-toolbar/actions/ShareDashboardButton';
+import { UnsavedChangesControls } from './new-toolbar/actions/UnsavedChangesControls';
 import { type ToolbarActionProps } from './new-toolbar/types';
 
 function getEditOrViewPanel(dashboard: DashboardScene) {
@@ -264,6 +265,7 @@ function DashboardControlsRenderer({ model }: SceneComponentProps<DashboardContr
       return (
         <>
           <div data-testid={selectors.pages.Dashboard.Controls} className={styles.controls}>
+            {dashboardNewLayoutsEnabled && <UnsavedChangesControls dashboard={dashboard} />}
             {!hideVariableControls && <VariableControls dashboard={dashboard} />}
             <DashboardControlsExtensionPoint dashboard={dashboard} />
             {!hideVariableControls && dashboardNewLayoutsEnabled && <AddControlsButton dashboard={dashboard} />}
@@ -313,6 +315,7 @@ function DashboardControlsRenderer({ model }: SceneComponentProps<DashboardContr
       {scopeFiltersEnabled && !editPanel && !scopesMegaMenuEnabled && (
         <ContextualNavigationPaneToggle className={styles.contextualNavToggle} hideWhenOpen={true} />
       )}
+      {dashboardNewLayoutsEnabled && <UnsavedChangesControls dashboard={dashboard} />}
       {!hideVariableControls && (
         <>
           <VariableControls dashboard={dashboard} variablesOverride={panelEditVariables} />
