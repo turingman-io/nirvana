@@ -17936,6 +17936,7 @@
         }
       }
     },
+    "description-last-value-line": "Draw a dashed line at the last value of each series, with the value at the right edge of the graph",
     "insert-nulls-editor": {
       "disconnect-options": {
         "label-never": "Never",
@@ -17959,6 +17960,7 @@
       "title-the-input-expects-a-segment-list": "The input expects a segment list",
       "tooltip-help": "Help"
     },
+    "name-last-value-line": "Last value line",
     "name-time-zone": "Time zone",
     "nulls-threshold-input": {
       "placeholder-never": "Never"

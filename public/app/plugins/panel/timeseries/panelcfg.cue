@@ -37,6 +37,7 @@ composableKinds: PanelCfg: lineage: {
 				orientation?:           common.VizOrientation
 				annotations?:           common.VizAnnotations
 				disableKeyboardEvents?: bool
+				lastValueLine?:         bool
 			} @cuetsy(kind="interface")
 
 			FieldConfig: common.GraphFieldConfig & {} @cuetsy(kind="interface")
