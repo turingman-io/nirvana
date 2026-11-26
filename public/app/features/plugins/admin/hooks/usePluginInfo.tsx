@@ -5,6 +5,7 @@ import { type PageInfoItem } from '../../../../core/components/Page/types';
 import { PluginDisabledBadge } from '../components/Badges/PluginDisabledBadge';
 import { PluginDetailsHeaderDependencies } from '../components/PluginDetailsHeaderDependencies';
 import { PluginDetailsHeaderSignature } from '../components/PluginDetailsHeaderSignature';
+import { PluginDetailsId } from '../components/PluginDetailsId';
 import { formatGrafanaDependency, getLatestCompatibleVersion } from '../helpers';
 import { type CatalogPlugin } from '../types';
 
@@ -64,6 +65,11 @@ export const usePluginInfo = (plugin?: CatalogPlugin): PageInfoItem[] => {
       value: plugin.orgName,
     });
   }
+
+  info.push({
+    label: t('plugins.details.labels.pluginId', 'Plugin ID'),
+    value: <PluginDetailsId pluginId={plugin.id} />,
+  });
 
   const showDownloads =
     !plugin.signatureType ||
