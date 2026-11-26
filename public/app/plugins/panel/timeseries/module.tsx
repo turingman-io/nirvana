@@ -8,7 +8,7 @@ import { TimeSeriesPanel } from './TimeSeriesPanel';
 import { TimezonesEditor } from './TimezonesEditor';
 import { defaultGraphConfig, getGraphFieldConfig } from './config';
 import { graphPanelChangedHandler } from './migrations';
-import { type FieldConfig, type Options } from './panelcfg.gen';
+import { EndLabelsMode, type FieldConfig, type Options } from './panelcfg.gen';
 import { timeseriesPresetsSupplier } from './presets';
 import { timeseriesSuggestionsSupplier } from './suggestions';
 
@@ -30,6 +30,24 @@ export const plugin = new PanelPlugin<Options, FieldConfig>(TimeSeriesPanel)
         'Enable filter to display series based on labels or names'
       ),
       showIf: (c) => c.legend.showLegend,
+    });
+
+    builder.addRadio({
+      path: 'endLabels',
+      name: t('timeseries.legend.name-end-labels', 'End labels'),
+      category: legendCategory,
+      description: t(
+        'timeseries.legend.description-end-labels',
+        'Label each series with its name or last value at the end of its line'
+      ),
+      defaultValue: EndLabelsMode.Off,
+      settings: {
+        options: [
+          { value: EndLabelsMode.Off, label: t('timeseries.legend.end-labels-off', 'Off') },
+          { value: EndLabelsMode.Name, label: t('timeseries.legend.end-labels-name', 'Name') },
+          { value: EndLabelsMode.Value, label: t('timeseries.legend.end-labels-value', 'Value') },
+        ],
+      },
     });
 
     builder.addCustomEditor({

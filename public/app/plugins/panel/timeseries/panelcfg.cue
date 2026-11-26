@@ -22,6 +22,7 @@ composableKinds: PanelCfg: lineage: {
 	schemas: [{
 		version: [0, 0]
 		schema: {
+			EndLabelsMode: "off" | "name" | "value" @cuetsy(kind="enum", memberNames="Off|Name|Value")
 			TimeSeriesLegendOptions: {
 				common.VizLegendOptions
 				enableFacetedFilter?: bool | *false
@@ -37,6 +38,7 @@ composableKinds: PanelCfg: lineage: {
 				orientation?:           common.VizOrientation
 				annotations?:           common.VizAnnotations
 				disableKeyboardEvents?: bool
+				endLabels?:             EndLabelsMode
 			} @cuetsy(kind="interface")
 
 			FieldConfig: common.GraphFieldConfig & {} @cuetsy(kind="interface")

@@ -231,6 +231,13 @@ The tooltip also provides the following options:
 
 For more information, refer to the [Configure legend documentation](https://grafana.com/docs/grafana/<GRAFANA_VERSION>/visualizations/panels-visualizations/configure-legend/#series-visibility).
 
+#### End labels
+
+Label each series directly on the graph with its **Name** or its last **Value** in the time range. The default is **Off**.
+
+Each label is right-aligned with the last point of its line, just above it, in the color of the series.
+Labels of series that end at a similar value are stacked so they don't overlap, and labels are drawn beneath the series lines so they never hide data or the hover crosshair.
+
 ### Axis options
 
 {{< docs/shared lookup="visualizations/axis-options-1.md" source="grafana" version="<GRAFANA_VERSION>" leveloffset="+1" >}}
