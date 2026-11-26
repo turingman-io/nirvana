@@ -153,7 +153,8 @@ After toggling the switch on, click the **Series visibility** icon to open a too
 
 The tooltip also provides the following options:
 
-- **Select all and Deselect all**: Toggle every value in a section.
+- **Search**: Narrow both sections to the names and label values that match. The search is a case-insensitive regular expression, and accepts RE2-style inline flags such as `(?-i)` for a case-sensitive match. Label groups with matching values open automatically.
+- **Select all and Deselect all**: Toggle every value in a section. While you search, they only toggle the matching values.
 - **Clear all**: Reset the filter.
 - **Pin to sidebar**: Dock the filter alongside the panel so it stays open while you explore.
 

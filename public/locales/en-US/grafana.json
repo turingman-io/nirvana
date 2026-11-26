@@ -11671,6 +11671,8 @@
       "faceted-by-labels": "By labels",
       "faceted-by-name": "By name",
       "faceted-deselect-all": "Deselect all",
+      "faceted-no-matches": "No matching names or values",
+      "faceted-search-placeholder": "Search",
       "faceted-select-all": "Select all",
       "only-this-series-selected": "Only {{label}} selected",
       "pin-filter": "Pin to sidebar",
