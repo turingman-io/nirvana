@@ -63,6 +63,8 @@ export interface Props extends Themeable2 {
   hasLinks?: boolean;
   /** Percent change color mode */
   percentChangeColorMode?: PercentChangeColorMode;
+  /** Secondary text shown under the value, e.g. when the value was last updated */
+  caption?: string;
 
   /**
    * If part of a series of stat panes, this is the total number.

@@ -21,6 +21,8 @@ import { percentChangeString } from './PercentChange';
 const LINE_HEIGHT = 1.2;
 const MAX_TITLE_SIZE = 30;
 const VALUE_FONT_WEIGHT = 500;
+const VALUE_TO_CAPTION_RATIO = 3;
+const MIN_CAPTION_SIZE = 12;
 
 export abstract class BigValueLayout {
   titleFontSize: number;
@@ -181,6 +183,33 @@ export abstract class BigValueLayout {
     };
   }
 
+  getCaptionStyles(): CSSProperties {
+    const styles: CSSProperties = {
+      fontSize: Math.min(Math.max(this.valueFontSize / VALUE_TO_CAPTION_RATIO, MIN_CAPTION_SIZE), MAX_TITLE_SIZE),
+      lineHeight: LINE_HEIGHT,
+      maxWidth: '100%',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      position: 'relative',
+      zIndex: 1,
+      color: this.props.theme.colors.text.secondary,
+    };
+
+    if (this.justifyCenter) {
+      styles.textAlign = 'center';
+    }
+
+    switch (this.props.colorMode) {
+      case BigValueColorMode.Background:
+      case BigValueColorMode.BackgroundSolid:
+        styles.color = getTextColorForAlphaBackground(this.valueColor, this.props.theme.isDark);
+        break;
+    }
+
+    return styles;
+  }
+
   getValueAndTitleContainerStyles() {
     const styles: CSSProperties = {
       display: 'flex',
@@ -299,6 +328,10 @@ class WideNoChartLayout extends BigValueLayout {
       if (props.value.percentChange != null) {
         // percent change uses 40% of value height, so we want to scale the value font size accordingly
         valueHeight = valueHeight * 0.75;
+      }
+      if (props.caption) {
+        // leave room for the caption line under the value
+        valueHeight = valueHeight / (1 + 1 / VALUE_TO_CAPTION_RATIO);
       }
       // initial value size
       this.valueFontSize = calculateFontSize(
@@ -489,6 +522,10 @@ export class StackedWithNoChartLayout extends BigValueLayout {
       if (props.value.percentChange != null) {
         // percent change uses 40% of value height, so we want to scale the value font size accordingly
         valueHeight = valueHeight * 0.75;
+      }
+      if (props.caption) {
+        // leave room for the caption line under the value
+        valueHeight = valueHeight / (1 + 1 / VALUE_TO_CAPTION_RATIO);
       }
       this.valueFontSize = calculateFontSize(
         this.valueToAlignTo,

@@ -17258,6 +17258,7 @@
       "label-value": "Value"
     },
     "description-graph-mode": "Stat panel graph / sparkline mode",
+    "description-show-last-updated": "Show the time of the most recent data point under each value",
     "description-text-mode": "Control if name and value is displayed or just name",
     "graph-mode": {
       "options": {
@@ -17265,10 +17266,12 @@
         "label-none": "None"
       }
     },
+    "last-updated": "Last updated {{time}}",
     "name-color-modcolor-mode-options": {
       "label": "Color mode"
     },
     "name-graph-mode": "Graph mode",
+    "name-show-last-updated": "Show last updated",
     "name-show-percent-change": "Show percent change",
     "name-text-alignment": "Text alignment",
     "name-text-mode": "Text mode",
