@@ -994,6 +994,44 @@ describe('TableNG', () => {
       expect(container.querySelector('[aria-label="Expand row"]')).not.toBeInTheDocument();
     });
 
+    it('pins the expand column', () => {
+      const { container } = render(<TableNG data={createNestedDataFrame()} width={800} height={600} />);
+
+      const headers = container.querySelectorAll('[role="columnheader"]');
+      expect(headers[0]).toHaveTextContent('Expand nested rows');
+      expect(headers[0]).toHaveClass('rdg-cell-frozen-start');
+      expect(headers[1]).not.toHaveClass('rdg-cell-frozen-start');
+      expect(container.querySelector('[aria-label="Expand row"]')!.closest('[role="gridcell"]')).toHaveClass(
+        'rdg-cell-frozen-start'
+      );
+    });
+
+    it('freezes the configured number of columns after the expand column', () => {
+      const { container } = render(
+        <TableNG data={createNestedDataFrame()} width={800} height={600} frozenColumns={1} />
+      );
+
+      const headers = container.querySelectorAll('[role="columnheader"]');
+      expect(headers[0]).toHaveTextContent('Expand nested rows');
+      expect(headers[1]).toHaveTextContent('Column A');
+      expect(headers[1]).toHaveClass('rdg-cell-frozen-start');
+      expect(headers[2]).toHaveTextContent('Column B');
+      expect(headers[2]).not.toHaveClass('rdg-cell-frozen-start');
+    });
+
+    it('expands nested rows when columns are frozen', async () => {
+      const { container } = render(
+        <TableNG data={createNestedDataFrame()} width={800} height={600} frozenColumns={1} />
+      );
+
+      await user.click(container.querySelector('[aria-label="Expand row"]')!);
+
+      expect(container.querySelector('[aria-expanded="true"]')).toBeInTheDocument();
+      ['Nested A', 'Nested B', 'N1', 'N2'].forEach((text) => {
+        expect(screen.getByText(text)).toBeInTheDocument();
+      });
+    });
+
     it('keeps the expander as the first column when there are no rows to expand', () => {
       // The first data column's header only lines up with the panel title when the expander sits in
       // front of it, so the expander column stays even with nothing to expand. rdg's

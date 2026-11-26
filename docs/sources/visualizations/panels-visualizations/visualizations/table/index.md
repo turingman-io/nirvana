@@ -268,6 +268,9 @@ Click the expand icon on a row to toggle the visibility of its nested table:
 
 {{< figure src="/media/docs/grafana/panels-visualizations/screenshot-nested-table-expanded-v13.1.png" max-width="650px" alt="Table with two rows expanded showing nested sub-tables" >}}
 
+The expand column stays pinned to the left side of the table, so you can expand and collapse rows while a wide table is scrolled horizontally.
+The **Frozen columns** option applies to tables with nested rows as well: the columns it freezes follow the expand column.
+
 To sort nested and top-level rows in nested tables, click a column title to change the sort order from default to descending to ascending.
 Each time you click, the sort order changes to the next option in the cycle.
 You can sort multiple columns by holding the `Cmd` or `Ctrl` key and clicking the column name.
@@ -290,7 +293,7 @@ For more information, refer to [Apply overrides to nested table fields](#apply-o
 | -------------------- | --------------------------------------------------------- |
 | Show table header    | Show or hide column names imported from your data source. |
 | Show row numbers     | Display row numbers on the left side of the table. For more information, refer to [Show row numbers](#show-row-numbers). |
-| Frozen columns       | Freeze columns starting from the left side of the table. Enter a value to set how many columns are frozen. |
+| Frozen columns       | Freeze columns starting from the left side of the table. Enter a value to set how many columns are frozen. In tables with [nested rows](#nested-tables), the expand column is always pinned and isn't counted. |
 | Cell height          | Set the height of the cell. Choose from **Small**, **Medium**, or **Large**. |
 | Zebra striping       | Alternate the background color of every other row. |
 | Show columns sidebar | Toggle on the switch to have the column management sidebar open by default. In the sidebar, you can hide, show, and reorder columns. Viewers can close the sidebar when interacting with the table, but it's open by default the next time they load the visualization. |

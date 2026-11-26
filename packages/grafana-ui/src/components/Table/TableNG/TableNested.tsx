@@ -90,6 +90,7 @@ export function TableNested(props: TableNGProps & { nestedFramesField: Field<Dat
     enablePagination = false,
     enableSharedCrosshair = false,
     enableVirtualization,
+    frozenColumns = 0,
     getActions = () => [],
     height,
     pageSize,
@@ -257,10 +258,8 @@ export function TableNested(props: TableNGProps & { nestedFramesField: Field<Dat
         parseFloat(theme.spacing(0.5))
       )
     : 0;
-  // nested tables don't support frozen columns; subtract expander column width
-  const frozenColumns = 0;
-  const numFrozenColsFullyInView = 0;
-  // A scrollbar appearing/disappearing changes how much room the columns have, so factor it out.
+  // The expander column takes its width out of the room the data columns share. A scrollbar
+  // appearing/disappearing changes how much room the columns have, so factor it out too.
   const availableWidth = useMemo(
     () =>
       width -
@@ -300,7 +299,13 @@ export function TableNested(props: TableNGProps & { nestedFramesField: Field<Dat
     preventHorizontalOverflow,
   });
 
-  const [widths] = useColWidths(preparedFields, availableWidth, frozenColumns, widthConfigResetKey, contentAwareWidths);
+  const [widths, numFrozenColsFullyInView] = useColWidths(
+    preparedFields,
+    availableWidth,
+    frozenColumns,
+    widthConfigResetKey,
+    contentAwareWidths
+  );
   const lastColumnExtraPadding = tableRefreshEnabled ? TABLE.CELL_PADDING : 0;
 
   const headerHeight = useHeaderHeight({
@@ -516,10 +521,12 @@ export function TableNested(props: TableNGProps & { nestedFramesField: Field<Dat
       hoverOverflow,
       disableSanitizeHtml,
       jsonSyntaxHighlightingEnabled,
+      frozenColumns,
       getCellActions,
       getCellColorInlineStyles,
       getTextColorForBackground,
       maxRowHeight,
+      numFrozenColsFullyInView,
       onCellFilterAdded,
       onFieldAddToAssistant,
       onCellAddToAssistant,
@@ -548,6 +555,10 @@ export function TableNested(props: TableNGProps & { nestedFramesField: Field<Dat
       key: EXPANDED_COLUMN_KEY,
       sortable: false,
       resizable: false,
+      // Pinned like the row-number gutter, so the expand toggles stay at the left edge, ahead of any
+      // frozen columns, and in view while the table scrolls horizontally. A static render
+      // (virtualization off, e.g. for reports) only needs that when columns are frozen.
+      frozen: frozenColumns > 0 || enableVirtualization !== false,
       name: t('grafana-ui.table.nested-table.expander-column-name', 'Expand nested rows'),
       field: {
         name: '',
@@ -637,7 +648,9 @@ export function TableNested(props: TableNGProps & { nestedFramesField: Field<Dat
       styles.noDataNested,
       data.fields.length,
       commonDataGridProps,
+      enableVirtualization,
       expandedRows,
+      frozenColumns,
       getRowStableKeyForRowIdx,
       nestedRows,
       noValue,
