@@ -13,6 +13,7 @@ import { getFocusStyles, getInternalRadius } from '../../themes/mixins';
 import { usePointerDistance } from '../../utils/usePointerDistance';
 import { useElementSelection } from '../ElementSelectionContext/ElementSelectionContext';
 import { Icon } from '../Icon/Icon';
+import { Stack } from '../Layout/Stack/Stack';
 import { LoadingBar } from '../LoadingBar/LoadingBar';
 import { Text } from '../Text/Text';
 import { Tooltip } from '../Tooltip/Tooltip';
@@ -334,61 +335,67 @@ export function PanelChrome({
     [onSelect]
   );
 
-  const headerContent = (
-    <>
-      {/* Non collapsible title */}
-      {!collapsible && title && (
-        <div className={styles.title}>
-          <Text
-            element="h2"
-            variant={visualRefreshEnabled ? 'base' : 'h6'}
-            truncate
-            title={typeof title === 'string' ? title : undefined}
-            weight="medium"
-            id={panelTitleId}
-          >
+  const titleContent = collapsible ? (
+    <div className={styles.title}>
+      <Text element="h2" variant={visualRefreshEnabled ? 'base' : 'h6'} weight="medium">
+        <button
+          type="button"
+          className={styles.clearButtonStyles}
+          onClick={() => {
+            toggleOpen();
+            if (onToggleCollapse) {
+              onToggleCollapse(!collapsed);
+            }
+          }}
+          aria-expanded={!collapsed}
+          aria-controls={!collapsed ? panelContentId : undefined}
+        >
+          <Icon
+            name={!collapsed ? 'angle-down' : 'angle-right'}
+            aria-hidden={!!title}
+            aria-label={
+              !title ? t('grafana-ui.panel-chrome.aria-label-toggle-collapse', 'toggle collapse panel') : undefined
+            }
+          />
+          <Text variant={visualRefreshEnabled ? 'base' : 'h6'} truncate id={panelTitleId}>
             {title}
           </Text>
-        </div>
+        </button>
+      </Text>
+    </div>
+  ) : title ? (
+    <div className={styles.title}>
+      <Text
+        element="h2"
+        variant={visualRefreshEnabled ? 'base' : 'h6'}
+        truncate
+        title={typeof title === 'string' ? title : undefined}
+        weight="medium"
+        id={panelTitleId}
+      >
+        {title}
+      </Text>
+    </div>
+  ) : null;
+
+  // Panels without a title keep the description icon with the other title items
+  const titleItemsDescription = titleContent ? null : descriptionTitleItem;
+
+  const headerContent = (
+    <>
+      {titleContent && (
+        <Stack direction="row" alignItems="center" gap={0.5}>
+          {titleContent}
+          {descriptionTitleItem}
+        </Stack>
       )}
 
-      {/* Collapsible title */}
-      {collapsible && (
-        <div className={styles.title}>
-          <Text element="h2" variant={visualRefreshEnabled ? 'base' : 'h6'} weight="medium">
-            <button
-              type="button"
-              className={styles.clearButtonStyles}
-              onClick={() => {
-                toggleOpen();
-                if (onToggleCollapse) {
-                  onToggleCollapse(!collapsed);
-                }
-              }}
-              aria-expanded={!collapsed}
-              aria-controls={!collapsed ? panelContentId : undefined}
-            >
-              <Icon
-                name={!collapsed ? 'angle-down' : 'angle-right'}
-                aria-hidden={!!title}
-                aria-label={
-                  !title ? t('grafana-ui.panel-chrome.aria-label-toggle-collapse', 'toggle collapse panel') : undefined
-                }
-              />
-              <Text variant={visualRefreshEnabled ? 'base' : 'h6'} truncate id={panelTitleId}>
-                {title}
-              </Text>
-            </button>
-          </Text>
-        </div>
-      )}
-
-      {(titleItems || descriptionTitleItem) && (
+      {(titleItems || titleItemsDescription) && (
         <div
           className={cx(styles.titleItems, isInHoverSlot && styles.hoverSlotTitleItems, dragClassCancel)}
           data-testid="title-items-container"
         >
-          {descriptionTitleItem}
+          {titleItemsDescription}
           {titleItems}
         </div>
       )}

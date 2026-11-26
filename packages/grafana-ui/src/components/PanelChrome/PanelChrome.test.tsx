@@ -134,6 +134,48 @@ it('renders panel with a header with icons in place if prop titleItems', () => {
   expect(screen.getByTestId('title-items-container')).toBeInTheDocument();
 });
 
+describe('description icon', () => {
+  it('is shown right after the title, before the title items', () => {
+    setup({ title: 'Panel title', description: 'Panel description', titleItems: <span>Panel links</span> });
+
+    const title = screen.getByRole('heading', { name: 'Panel title' });
+    const descriptionIcon = screen.getByTestId('icon-info-circle');
+    const titleItems = screen.getByTestId('title-items-container');
+
+    expect(title.compareDocumentPosition(descriptionIcon)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(descriptionIcon.compareDocumentPosition(titleItems)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(within(titleItems).queryByTestId('icon-info-circle')).not.toBeInTheDocument();
+  });
+
+  it('is shown right after the title of a collapsible panel', () => {
+    setup({ title: 'Panel title', description: 'Panel description', collapsible: true });
+
+    const toggle = screen.getByRole('button', { name: 'Panel title' });
+
+    expect(toggle.compareDocumentPosition(screen.getByTestId('icon-info-circle'))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+    expect(screen.queryByTestId('title-items-container')).not.toBeInTheDocument();
+  });
+
+  it('stays with the title items when the panel has no title', () => {
+    setup({ description: 'Panel description', titleItems: <span>Panel links</span> });
+
+    const titleItems = screen.getByTestId('title-items-container');
+
+    expect(within(titleItems).getByTestId('icon-info-circle')).toBeInTheDocument();
+    expect(within(titleItems).getByText('Panel links')).toBeInTheDocument();
+  });
+
+  it('is shown in the hover header of a panel without a title', () => {
+    setup({ description: 'Panel description', hoverHeader: true });
+
+    const hoverHeader = screen.getByTestId(selectors.components.Panels.Panel.HoverWidget.container);
+
+    expect(within(hoverHeader).getByTestId('icon-info-circle')).toBeInTheDocument();
+  });
+});
+
 it('offers cancelling a query once it has been loading for two seconds', () => {
   jest.useFakeTimers();
   setup({ title: 'Loading', loadingState: LoadingState.Loading, onCancelQuery: jest.fn() });
